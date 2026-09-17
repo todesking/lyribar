@@ -33,4 +33,32 @@ struct SettingsTests {
         #expect(!reloaded.showTrackInfo)
         #expect(reloaded.launchAtLogin)
     }
+
+    @Test func readsValuesStoredBefore() {
+        let (defaults, suite) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(180.0, forKey: Settings.Key.maxWidth)
+        defaults.set(false, forKey: Settings.Key.showTrackInfo)
+        defaults.set(true, forKey: Settings.Key.launchAtLogin)
+
+        let settings = Settings(defaults: defaults)
+        #expect(settings.maxWidth == 180)
+        #expect(!settings.showTrackInfo)
+        #expect(settings.launchAtLogin)
+    }
+
+    @Test func writesOnlyToTheInjectedSuite() {
+        let (defaults, suite) = makeDefaults()
+        let (otherDefaults, otherSuite) = makeDefaults()
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            otherDefaults.removePersistentDomain(forName: otherSuite)
+        }
+
+        let settings = Settings(defaults: defaults)
+        settings.maxWidth = 555
+
+        #expect(defaults.double(forKey: Settings.Key.maxWidth) == 555)
+        #expect(Settings(defaults: otherDefaults).maxWidth == 300)
+    }
 }
