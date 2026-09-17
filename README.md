@@ -28,8 +28,8 @@ set up.
 
 On the first launch macOS asks for permission to control Spotify: Lyribar reads
 the current track and the playback position through Apple events. Allow it, or
-the menu bar stays empty. The answer can be changed later in **System Settings >
-Privacy & Security > Automation > Lyribar**.
+Lyribar cannot see what is playing. The answer can be changed later in **System
+Settings > Privacy & Security > Automation > Lyribar**.
 
 ## Usage
 
@@ -60,9 +60,10 @@ Clicking anywhere on the status item opens the menu:
 
 ## Troubleshooting
 
-**Nothing appears in the menu bar.** Lyribar only follows the Spotify desktop
-app. Check that it is running and playing, and that Lyribar is allowed under
-System Settings > Privacy & Security > Automation.
+**Only the icon shows, and the menu says "Not playing".** Lyribar only follows
+the Spotify desktop app, not the web player or another music app. Check that
+Spotify is running and playing, and that Lyribar is allowed under System
+Settings > Privacy & Security > Automation.
 
 **The menu says "No lyrics found".** LRCLIB has no synced lyrics for that track.
 Lyribar deliberately ignores unsynced (plain) lyrics, so a track that only has
