@@ -10,5 +10,11 @@ let package = Package(
             path: "Sources/Lyribar",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
+        .testTarget(
+            name: "LyribarTests",
+            dependencies: ["Lyribar"],
+            path: "Tests/LyribarTests",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
     ]
 )
