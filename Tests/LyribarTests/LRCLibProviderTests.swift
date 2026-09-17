@@ -15,6 +15,11 @@ struct LRCLibProviderTests {
 
     private func body(_ json: String) -> Data { Data(json.utf8) }
 
+    // The body LRCLIB really returns for a miss (checked against the live API, 2026-09-18).
+    private var trackNotFound: Data {
+        body(#"{"message":"Failed to find specified track","name":"TrackNotFound","statusCode":404}"#)
+    }
+
     @Test func getHitReturnsSyncedLyrics() async throws {
         let provider = provider { _ in
             (200, self.body(#"{"syncedLyrics":"[00:12.00]Hello","plainLyrics":"Hello"}"#))
@@ -49,7 +54,7 @@ struct LRCLibProviderTests {
     @Test func getMissFallsBackToSearch() async throws {
         let provider = provider { request in
             if request.url?.path == "/api/get" {
-                return (404, self.body(#"{"code":404,"name":"TrackNotFound"}"#))
+                return (404, self.trackNotFound)
             }
             return (
                 200,
@@ -77,7 +82,7 @@ struct LRCLibProviderTests {
 
     @Test func bothMissReturnNil() async throws {
         let provider = provider { request in
-            if request.url?.path == "/api/get" { return (404, self.body(#"{"code":404}"#)) }
+            if request.url?.path == "/api/get" { return (404, self.trackNotFound) }
             return (200, self.body("[]"))
         }
 
@@ -87,7 +92,7 @@ struct LRCLibProviderTests {
 
     @Test func searchWithoutAnySyncedLyricsReturnsNil() async throws {
         let provider = provider { request in
-            if request.url?.path == "/api/get" { return (404, self.body(#"{"code":404}"#)) }
+            if request.url?.path == "/api/get" { return (404, self.trackNotFound) }
             return (200, self.body(#"[{"syncedLyrics":null},{"plainLyrics":"No timing"}]"#))
         }
 
@@ -104,8 +109,14 @@ struct LRCLibProviderTests {
 
     @Test func serverErrorOnSearchThrows() async throws {
         let provider = provider { request in
-            if request.url?.path == "/api/get" { return (404, self.body(#"{"code":404}"#)) }
-            return (503, self.body("oops"))
+            if request.url?.path == "/api/get" { return (404, self.trackNotFound) }
+            // LRCLIB really does answer 503 like this when its database is busy.
+            return (
+                503,
+                self.body(
+                    #"{"message":"The server is busy, please retry in a moment","name":"ServerOverloaded","statusCode":503}"#
+                )
+            )
         }
 
         await #expect(throws: LRCLibError.unexpectedStatus(503)) {
