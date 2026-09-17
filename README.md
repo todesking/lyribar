@@ -1,8 +1,8 @@
 # Lyribar
 
 Lyribar is a macOS menu bar app that shows the lyrics of the song currently
-playing in Spotify. It lives in the status bar only, with no Dock icon or
-window of its own.
+playing in Spotify. It lives in the status bar, with no Dock icon and no
+window other than its settings.
 
 ## Usage
 
