@@ -40,3 +40,12 @@ func currentLineIndex(state: PlaybackState, status: LyricsResolver.Status, now: 
     guard state.track != nil, case .found(let lyrics, _) = status else { return nil }
     return LineTracker.currentIndex(at: state.position(at: now), in: lyrics)
 }
+
+/// The resolver follows track changes slightly after the playback state does; until it catches up,
+/// its status still describes the previous track and must not be shown.
+func effectiveStatus(
+    state: PlaybackState, resolvedTrack: TrackInfo?, status: LyricsResolver.Status
+) -> LyricsResolver.Status {
+    guard let track = state.track else { return .idle }
+    return track.isSameTrack(as: resolvedTrack) ? status : .loading
+}
