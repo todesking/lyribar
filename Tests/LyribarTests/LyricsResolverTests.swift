@@ -54,11 +54,13 @@ private actor GatedProvider: LyricsProvider {
     }
 
     func waitForRequest(_ id: String) async -> Bool {
-        for _ in 0..<10_000 {
+        // Time-based: the fetch starts on the main actor, which other suites may keep busy.
+        let deadline = ContinuousClock.now + .seconds(5)
+        while ContinuousClock.now < deadline {
             if requested.contains(id) { return true }
-            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(1))
         }
-        return false
+        return requested.contains(id)
     }
 }
 
