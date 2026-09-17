@@ -21,15 +21,38 @@ final class StatusItemController {
         set { menu.onOpenSettings = newValue }
     }
 
+    // Internal so tests can drive the updates without a real status bar item.
+    var barView: LyricsBarView?
+
     private var statusItem: NSStatusItem?
-    private var barView: LyricsBarView?
     private var timer: Timer?
     private var lastSnapshot: Snapshot?
+    private var settingsObservation: ObservationLoop?
 
-    init(monitor: PlaybackMonitor, resolver: LyricsResolver, settings: Settings) {
+    init(
+        monitor: PlaybackMonitor,
+        resolver: LyricsResolver,
+        settings: Settings,
+        schedule: @escaping ObservationLoop.Schedule = ObservationLoop.mainActorSchedule
+    ) {
         self.monitor = monitor
         self.resolver = resolver
         self.settings = settings
+        observeSettings(schedule: schedule)
+    }
+
+    /// The tick already reads the settings, so this only removes the delay of up to one tick.
+    private func observeSettings(schedule: @escaping ObservationLoop.Schedule) {
+        settingsObservation = ObservationLoop(
+            read: { [weak self] in
+                guard let self else { return }
+                _ = settings.maxWidth
+                _ = settings.showTrackInfo
+            },
+            onChange: { [weak self] in
+                self?.tick(now: Date())
+            },
+            schedule: schedule)
     }
 
     func start() {
