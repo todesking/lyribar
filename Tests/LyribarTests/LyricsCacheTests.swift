@@ -18,6 +18,11 @@ struct LyricsCacheTests {
         try body(LyricsCache(directory: root.appending(path: "lyrics")))
     }
 
+    @Test func defaultDirectoryIsUnderCaches() {
+        let components = Array(LyricsCache.defaultDirectory.pathComponents.suffix(3))
+        #expect(components == ["Caches", "com.todesking.lyribar", "lyrics"])
+    }
+
     @Test func setThenGetRoundTrip() throws {
         try withCache { cache in
             cache.set(track, lyrics: lyrics, source: LRCLibProvider.source)
