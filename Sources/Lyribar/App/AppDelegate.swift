@@ -3,14 +3,24 @@ import AppKit
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let playbackMonitor = PlaybackMonitor()
-    private let lyricsResolver = LyricsResolver(provider: LRCLibProvider(), cache: LyricsCache())
+    private let lyricsCache = LyricsCache()
     private let settings = Settings()
+    private lazy var lyricsResolver = LyricsResolver(provider: LRCLibProvider(), cache: lyricsCache)
+    private lazy var launchAtLogin = LaunchAtLoginController(settings: settings)
+    private lazy var settingsWindow = SettingsWindowController(
+        settings: settings, launchAtLogin: launchAtLogin, cache: lyricsCache)
     private var statusItemController: StatusItemController?
     private var resolvedTrack: TrackInfo?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // The login item may have been removed in System Settings since the last run.
+        launchAtLogin.syncFromSystem()
+
         let controller = StatusItemController(
             monitor: playbackMonitor, resolver: lyricsResolver, settings: settings)
+        controller.onOpenSettings = { [weak self] in
+            self?.settingsWindow.show()
+        }
         controller.start()
         statusItemController = controller
 

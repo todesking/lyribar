@@ -15,7 +15,12 @@ final class StatusItemController {
     private let resolver: LyricsResolver
     private let settings: Settings
 
-    private let menu = StatusMenu()
+    let menu = StatusMenu()
+    var onOpenSettings: (() -> Void)? {
+        get { menu.onOpenSettings }
+        set { menu.onOpenSettings = newValue }
+    }
+
     private var statusItem: NSStatusItem?
     private var barView: LyricsBarView?
     private var timer: Timer?
