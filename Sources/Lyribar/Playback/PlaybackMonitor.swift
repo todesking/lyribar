@@ -1,6 +1,9 @@
 import AppKit
 import Observation
 
+// Track changes and play/pause come from the com.spotify.client.PlaybackStateChanged distributed
+// notification (userInfo keys: see SpotifyNotification.Key). Seeks post no notification, so they are
+// only picked up by the 1-second AppleScript resync while playing.
 @MainActor
 @Observable
 final class PlaybackMonitor {

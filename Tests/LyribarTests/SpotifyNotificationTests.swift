@@ -11,9 +11,15 @@ struct SpotifyNotificationTests {
             "Name": "Song",
             "Artist": "Artist",
             "Album": "Album",
-            "Duration": 354_000,
-            "Playback Position": 12.5,
+            "Album Artist": "Artist",
+            "Duration": NSNumber(value: 354_000),
+            "Playback Position": NSNumber(value: 12.5),
             "Player State": "Playing",
+            "Disc Number": NSNumber(value: 1),
+            "Track Number": NSNumber(value: 4),
+            "Popularity": NSNumber(value: 37),
+            "Play Count": NSNumber(value: 0),
+            "Has Artwork": true,
         ]
     }
 

@@ -3,7 +3,13 @@ import Foundation
 enum SpotifyNotification {
     static let name = Notification.Name("com.spotify.client.PlaybackStateChanged")
 
-    // userInfo keys of com.spotify.client.PlaybackStateChanged (expected; not yet confirmed against a real notification).
+    // userInfo keys of com.spotify.client.PlaybackStateChanged, confirmed with Spotify 1.2.99.
+    // Every notification carries: Track ID (String, "spotify:track:..."), Name, Artist, Album,
+    // Album Artist (String), Duration (NSNumber, milliseconds), Playback Position (NSNumber,
+    // fractional seconds), Player State (String: "Playing" / "Paused"; "Stopped" is handled but was
+    // never observed), Disc Number, Track Number, Popularity, Play Count (NSNumber), Has Artwork (Bool).
+    // Duration right after a track change can be provisional (222000, then 222027 for the same track).
+    // Seeking does not post a notification.
     enum Key {
         static let trackID = "Track ID"
         static let title = "Name"

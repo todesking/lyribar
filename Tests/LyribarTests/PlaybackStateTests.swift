@@ -31,4 +31,13 @@ struct PlaybackStateTests {
         let state = PlaybackState(track: nil, isPlaying: true, syncedPosition: 1, syncedAt: syncedAt)
         #expect(state.position(at: syncedAt.addingTimeInterval(1)) == 2)
     }
+
+    @Test func trackIdentityIgnoresDuration() {
+        var refined = track
+        refined.duration = 200.027
+        #expect(refined != track)
+        #expect(refined.isSameTrack(as: track))
+        #expect(!track.isSameTrack(as: TrackInfo(id: "spotify:track:xyz", title: "Song", artist: "Artist", duration: 200)))
+        #expect(!track.isSameTrack(as: nil))
+    }
 }
