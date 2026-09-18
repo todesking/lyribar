@@ -10,6 +10,11 @@ struct SettingsView: View {
     static let maxWidthRange: ClosedRange<Double> = 150...600
     static let maxWidthStep: Double = 10
     static let width: CGFloat = 380
+    static let lyricsDisplayTitle = "Lyrics display"
+    static let lyricsDisplayOptions: [(mode: LyricsDisplayMode, title: String)] = [
+        (.scrolling, "Scrolling lyrics"),
+        (.currentLine, "Current line only"),
+    ]
 
     @Bindable var settings: Settings
     let launchAtLogin: LaunchAtLoginController
@@ -29,6 +34,11 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                     Slider(value: $settings.maxWidth, in: Self.maxWidthRange, step: Self.maxWidthStep)
+                }
+                Picker(Self.lyricsDisplayTitle, selection: $settings.lyricsDisplayMode) {
+                    ForEach(Self.lyricsDisplayOptions, id: \.mode) { option in
+                        Text(option.title).tag(option.mode)
+                    }
                 }
                 Toggle("Show track name and artist", isOn: $settings.showTrackInfo)
             }

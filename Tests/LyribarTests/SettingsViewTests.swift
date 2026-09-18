@@ -21,4 +21,11 @@ struct SettingsViewTests {
         #expect(SettingsView.maxWidthStep == 10)
         #expect(SettingsView.maxWidthRange.contains(Settings.defaultMaxWidth))
     }
+
+    @Test func lyricsDisplayPickerOffersEveryMode() {
+        #expect(SettingsView.lyricsDisplayTitle == "Lyrics display")
+        #expect(SettingsView.lyricsDisplayOptions.map(\.mode) == [.scrolling, .currentLine])
+        #expect(SettingsView.lyricsDisplayOptions.map(\.title) == ["Scrolling lyrics", "Current line only"])
+        #expect(Set(SettingsView.lyricsDisplayOptions.map(\.mode)) == Set(LyricsDisplayMode.allCases))
+    }
 }

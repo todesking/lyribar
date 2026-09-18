@@ -79,8 +79,9 @@ struct StatusItemControllerTests {
 
     // The whole point of the reserved lyric width: the menu bar must not move between lines.
     @Test func widthStaysWhileTheLineChanges() {
-        let (controller, _, _, cleanup) = makeController()
+        let (controller, settings, _, cleanup) = makeController()
         defer { cleanup() }
+        settings.lyricsDisplayMode = .currentLine
         let barView = LyricsBarView(frame: NSRect(x: 0, y: 0, width: 0, height: 22))
         controller.barView = barView
 
@@ -108,6 +109,70 @@ struct StatusItemControllerTests {
         #expect(shown[2] == nil)
         #expect(shown[3]?.isEmpty == false)
         #expect(widths == [300, 300, 300, 300])
+    }
+
+    @Test func scrollingModeShowsTheRibbonAtTheSameWidth() {
+        let (controller, _, _, cleanup) = makeController()
+        defer { cleanup() }
+        let barView = LyricsBarView(frame: NSRect(x: 0, y: 0, width: 0, height: 22))
+        controller.barView = barView
+
+        let track = TrackInfo(id: "spotify:track:abc", title: "Song", artist: "Artist", duration: 200)
+        let syncedAt = Date(timeIntervalSince1970: 1_000)
+        let lyrics = SyncedLyrics(lines: [
+            LyricLine(time: 5, text: "short"),
+            LyricLine(time: 10, text: ""),
+            LyricLine(time: 20, text: String(repeating: "a much longer line of lyrics ", count: 10)),
+        ])
+        let state = PlaybackState(track: track, isPlaying: true, syncedPosition: 0, syncedAt: syncedAt)
+        let status = LyricsResolver.Status.found(lyrics, source: "lrclib")
+
+        var widths: [CGFloat] = []
+        var indices: [Int?] = []
+        for offset in [0, 5, 10, 20] as [TimeInterval] {
+            controller.render(state: state, status: status, now: syncedAt.addingTimeInterval(offset))
+            widths.append(barView.preferredWidth)
+            indices.append(barView.ribbonView.currentIndex)
+            #expect(barView.content.lyric == nil)
+            #expect(barView.ribbonView.lyrics == lyrics)
+        }
+
+        #expect(indices == [nil, 0, 1, 2])
+        #expect(widths == [300, 300, 300, 300])
+    }
+
+    // Seeking inside a line leaves the content as it was, but the ribbon still has to follow.
+    @Test func playbackReachesTheBarViewEvenWhenTheContentStays() {
+        let (controller, _, _, cleanup) = makeController()
+        defer { cleanup() }
+        let barView = LyricsBarView(frame: NSRect(x: 0, y: 0, width: 0, height: 22))
+        controller.barView = barView
+
+        let track = TrackInfo(id: "spotify:track:abc", title: "Song", artist: "Artist", duration: 200)
+        let syncedAt = Date(timeIntervalSince1970: 1_000)
+        let lyrics = SyncedLyrics(lines: [LyricLine(time: 5, text: "short"), LyricLine(time: 50, text: "next")])
+        let status = LyricsResolver.Status.found(lyrics, source: "lrclib")
+
+        let before = PlaybackState(track: track, isPlaying: true, syncedPosition: 10, syncedAt: syncedAt)
+        controller.render(state: before, status: status, now: syncedAt)
+        let after = PlaybackState(track: track, isPlaying: false, syncedPosition: 30, syncedAt: syncedAt)
+        controller.render(state: after, status: status, now: syncedAt)
+
+        #expect(barView.playback == after)
+    }
+
+    @Test func switchingTheDisplayModeRefreshesTheBarView() {
+        let (controller, settings, scheduler, cleanup) = makeController()
+        defer { cleanup() }
+        let barView = LyricsBarView(frame: NSRect(x: 0, y: 0, width: 0, height: 22))
+        barView.update(content: BarContent(lyric: "stale", trackInfo: "Song – Artist"), maxWidth: 999)
+        controller.barView = barView
+
+        settings.lyricsDisplayMode = .currentLine
+        scheduler.run()
+
+        #expect(barView.content == BarContent())
+        #expect(barView.maxWidth == 300)
     }
 
     // A track without lyrics shrinks back to the icon and the track info.

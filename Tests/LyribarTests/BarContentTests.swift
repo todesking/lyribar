@@ -14,12 +14,15 @@ struct BarContentTests {
         LyricLine(time: 30, text: "third"),
     ])
 
-    private func makeSettings(showTrackInfo: Bool = true) -> Settings {
+    private func makeSettings(
+        showTrackInfo: Bool = true, mode: LyricsDisplayMode = .currentLine
+    ) -> Settings {
         let suite = "LyribarTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
         let settings = Settings(defaults: defaults)
         settings.showTrackInfo = showTrackInfo
+        settings.lyricsDisplayMode = mode
         defaults.removePersistentDomain(forName: suite)
         return settings
     }
@@ -84,6 +87,45 @@ struct BarContentTests {
             let content = barContent(state: state(), status: status, lineIndex: 0, settings: makeSettings())
             #expect(!content.reservesLyricWidth)
         }
+    }
+
+    @Test func scrollingModeHandsOverTheWholeLyrics() {
+        for lineIndex in [nil, 0, 1, 2] as [Int?] {
+            let content = barContent(
+                state: state(), status: found, lineIndex: lineIndex, settings: makeSettings(mode: .scrolling))
+            #expect(content.ribbon == RibbonContent(lyrics: lyrics, currentIndex: lineIndex))
+            #expect(content.lyric == nil)
+            #expect(content.trackInfo == "Song – Artist")
+            #expect(content.reservesLyricWidth)
+        }
+    }
+
+    @Test func scrollingModeKeepsTheRibbonWhilePaused() {
+        let content = barContent(
+            state: state(playing: false), status: found, lineIndex: 2, settings: makeSettings(mode: .scrolling))
+        #expect(content.ribbon == RibbonContent(lyrics: lyrics, currentIndex: 2))
+    }
+
+    @Test func currentLineModeHasNoRibbon() {
+        let content = barContent(
+            state: state(), status: found, lineIndex: 0, settings: makeSettings(mode: .currentLine))
+        #expect(content.lyric == "first")
+        #expect(content.ribbon == nil)
+    }
+
+    @Test func noRibbonUnlessFound() {
+        let statuses: [LyricsResolver.Status] = [.idle, .loading, .notFound, .failed(StubError())]
+        for status in statuses {
+            let content = barContent(
+                state: state(), status: status, lineIndex: 0, settings: makeSettings(mode: .scrolling))
+            #expect(content == BarContent(trackInfo: "Song – Artist"))
+        }
+    }
+
+    @Test func noRibbonWithoutTrack() {
+        let content = barContent(
+            state: .empty(at: syncedAt), status: found, lineIndex: 0, settings: makeSettings(mode: .scrolling))
+        #expect(content == BarContent())
     }
 
     @Test func emptyWithoutTrack() {
