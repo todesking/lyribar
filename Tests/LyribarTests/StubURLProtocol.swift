@@ -3,13 +3,27 @@ import Foundation
 /// URLProtocol stub so tests never touch the network. The handler is global state, so suites using
 /// it must be `.serialized`.
 final class StubURLProtocol: URLProtocol {
+    enum Outcome: Sendable {
+        case response(status: Int, body: Data)
+        /// A transport failure, as URLSession reports a timeout or a dropped connection.
+        case failure(URLError)
+    }
+
     typealias Handler = @Sendable (URLRequest) -> (status: Int, body: Data)
+    typealias OutcomeHandler = @Sendable (URLRequest) -> Outcome
 
     private static let lock = NSLock()
-    nonisolated(unsafe) private static var handler: Handler?
+    nonisolated(unsafe) private static var handler: OutcomeHandler?
     nonisolated(unsafe) private static var requests: [URLRequest] = []
 
     static func session(_ handler: @escaping Handler) -> URLSession {
+        session(outcomes: { request in
+            let (status, body) = handler(request)
+            return .response(status: status, body: body)
+        })
+    }
+
+    static func session(outcomes handler: @escaping OutcomeHandler) -> URLSession {
         lock.withLock {
             self.handler = handler
             requests = []
@@ -36,7 +50,15 @@ final class StubURLProtocol: URLProtocol {
             client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
             return
         }
-        let (status, body) = handler(request)
+        let status: Int
+        let body: Data
+        switch handler(request) {
+        case .response(let responseStatus, let responseBody):
+            (status, body) = (responseStatus, responseBody)
+        case .failure(let error):
+            client?.urlProtocol(self, didFailWithError: error)
+            return
+        }
         guard
             let response = HTTPURLResponse(
                 url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil)
