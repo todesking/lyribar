@@ -129,8 +129,8 @@ Settings > Privacy & Security > Automation.
 (and neither has Spotify, if Spotify lyrics are set up). Lyribar deliberately
 ignores unsynced (plain) lyrics, so a track that only has those counts as a miss.
 
-**The menu says "Failed to load lyrics".** The request to LRCLIB failed — often a
-network hiccup. Lyribar retries a server error or a broken connection right away
+**The menu says "Failed to load lyrics".** The request to LRCLIB (or to Spotify,
+with nothing found on LRCLIB either) failed — often a network hiccup. Lyribar retries a server error or a broken connection right away
 (three times, backing off from half a second to two), and once more 30 seconds
 later. If that last attempt fails too it gives up until the track changes;
 switching to another track and back triggers a new attempt.
