@@ -26,7 +26,14 @@ struct LyricsCacheTests {
     @Test func setThenGetRoundTrip() throws {
         try withCache { cache in
             cache.set(track, lyrics: lyrics, source: LRCLibProvider.source)
-            #expect(cache.get(track)?.lines == lyrics.lines)
+            #expect(cache.get(track)?.lyrics.lines == lyrics.lines)
+        }
+    }
+
+    @Test func getReturnsTheStoredSource() throws {
+        try withCache { cache in
+            cache.set(track, lyrics: lyrics, source: "spotify")
+            #expect(cache.get(track)?.source == "spotify")
         }
     }
 
