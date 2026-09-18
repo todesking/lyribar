@@ -55,6 +55,16 @@ struct StatusMenuTests {
         #expect(StatusMenu.lyricsTitle(.found(lyrics, source: "other")) == "Lyrics from other")
     }
 
+    @Test func spotifyLyricsTitles() {
+        #expect(StatusMenu.lyricsTitle(.found(lyrics, source: "spotify")) == "Lyrics from Spotify")
+        #expect(
+            StatusMenu.lyricsTitle(.failed(SpotifyAuthError.cookieRejected)) == "Spotify cookie was rejected")
+        #expect(StatusMenu.lyricsTitle(.failed(SpotifyAuthError.notConfigured)) == "Failed to load lyrics")
+        #expect(
+            StatusMenu.lyricsTitle(.failed(SpotifyAuthError.unexpectedResponse(step: .token, status: 500)))
+                == "Failed to load lyrics")
+    }
+
     // The handler activates the app, which does not stick while the menu is still tracking.
     @Test func settingsItemInvokesHandlerAfterTheMenuCloses() {
         let scheduler = ManualScheduler()

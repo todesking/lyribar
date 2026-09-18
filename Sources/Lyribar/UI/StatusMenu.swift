@@ -55,12 +55,17 @@ final class StatusMenu: NSObject {
         case .loading: "Loading lyrics…"
         case .found(_, let source): "Lyrics from \(sourceName(source))"
         case .notFound: "No lyrics found"
+        case .failed(SpotifyAuthError.cookieRejected): "Spotify cookie was rejected"
         case .failed: "Failed to load lyrics"
         }
     }
 
     private static func sourceName(_ source: String) -> String {
-        source == LRCLibProvider.source ? "LRCLIB" : source
+        switch source {
+        case LRCLibProvider.source: "LRCLIB"
+        case SpotifyLyricsProvider.source: "Spotify"
+        default: source
+        }
     }
 
     // Deferred by one turn: activating the app while the menu is still tracking does not stick.
