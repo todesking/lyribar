@@ -33,15 +33,24 @@ Settings > Privacy & Security > Automation > Lyribar**.
 
 ## Usage
 
-Start Spotify and play something. The status item shows the current lyric line,
-then the track and artist, then the Lyribar icon. While the track has lyrics the
-item keeps the configured maximum width, so the rest of the menu bar does not
-shift from line to line: a line that is too wide scrolls back and forth, a short
-one sits at the left, and an instrumental passage leaves the space empty. The
-track and artist are truncated instead of scrolling. Without lyrics for the track
-the item shrinks to the track and artist, and when Spotify is not running or
-playback is stopped only the icon is left. A paused track keeps its last line on
-screen.
+Start Spotify and play something. The status item shows the lyrics, then the
+track and artist, then the Lyribar icon. The lyrics are laid out on one long
+ribbon that scrolls with the playback position: the line being sung starts a
+quarter of the way into the lyric area at the moment it begins, the lines before
+and after it are visible around it, and only the current line is drawn in the
+full text color. Seeing the neighbouring lines makes it easy to find your place
+even when the timings of the lyrics are a little off. An instrumental passage
+shows up as a gap, and a paused track keeps the ribbon where it is.
+
+With **Lyrics display** set to **Current line only**, the item shows just the
+current line instead: a line that is too wide scrolls back and forth, a short one
+sits at the left, and an instrumental passage leaves the space empty.
+
+While the track has lyrics the item keeps the configured maximum width in both
+modes, so the rest of the menu bar does not shift from line to line. The track
+and artist are truncated instead of scrolling. Without lyrics for the track the
+item shrinks to the track and artist, and when Spotify is not running or playback
+is stopped only the icon is left.
 
 Clicking anywhere on the status item opens the menu:
 
@@ -55,6 +64,8 @@ Clicking anywhere on the status item opens the menu:
 
 - **Maximum width** — how much of the menu bar the status item may take,
   150 to 600 pt, 300 pt by default.
+- **Lyrics display** — **Scrolling lyrics** (the default) scrolls every line
+  along with the playback; **Current line only** shows one line at a time.
 - **Show track name and artist** — on by default.
 - **Launch at login** — registers the app as a login item.
 - **Clear lyrics cache** — deletes the cached lyrics; the current size is shown
