@@ -48,6 +48,7 @@ final class StatusItemController {
                 guard let self else { return }
                 _ = settings.maxWidth
                 _ = settings.showTrackInfo
+                _ = settings.lyricsDisplayMode
             },
             onChange: { [weak self] in
                 self?.tick(now: Date())
