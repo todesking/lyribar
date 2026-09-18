@@ -79,8 +79,9 @@ struct StatusItemControllerTests {
 
     // The whole point of the reserved lyric width: the menu bar must not move between lines.
     @Test func widthStaysWhileTheLineChanges() {
-        let (controller, _, _, cleanup) = makeController()
+        let (controller, settings, _, cleanup) = makeController()
         defer { cleanup() }
+        settings.lyricsDisplayMode = .currentLine
         let barView = LyricsBarView(frame: NSRect(x: 0, y: 0, width: 0, height: 22))
         controller.barView = barView
 
