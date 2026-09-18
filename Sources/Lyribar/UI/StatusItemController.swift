@@ -93,6 +93,9 @@ final class StatusItemController {
 
     // Internal so tests can drive the rendering without Spotify running.
     func render(state: PlaybackState, status: LyricsResolver.Status, now: Date) {
+        // The ribbon interpolates the position between ticks, so it needs every state, not only
+        // the ones that change the snapshot.
+        barView?.playback = state
         let lineIndex = currentLineIndex(state: state, status: status, now: now)
         let snapshot = Snapshot(
             content: barContent(state: state, status: status, lineIndex: lineIndex, settings: settings),
