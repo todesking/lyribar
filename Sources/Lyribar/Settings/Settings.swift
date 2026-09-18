@@ -16,10 +16,13 @@ final class Settings {
         static let showTrackInfo = "showTrackInfo"
         static let launchAtLogin = "launchAtLogin"
         static let lyricsDisplayMode = "lyricsDisplayMode"
+        static let spotifySecretsURL = "spotifySecretsURL"
     }
 
     static let defaultMaxWidth: Double = 300
     static let defaultLyricsDisplayMode = LyricsDisplayMode.scrolling
+    static let defaultSpotifySecretsURL = URL(
+        string: "https://raw.githubusercontent.com/xyloflake/spot-secrets-go/main/secrets/secretDict.json")!
 
     var maxWidth: Double {
         didSet { defaults.set(maxWidth, forKey: Key.maxWidth) }
@@ -32,6 +35,15 @@ final class Settings {
     }
     var lyricsDisplayMode: LyricsDisplayMode {
         didSet { defaults.set(lyricsDisplayMode.rawValue, forKey: Key.lyricsDisplayMode) }
+    }
+
+    /// Hidden setting, changed with `defaults write` when the published secrets move. It is not
+    /// registered as a default, so an unset key stays unset.
+    var spotifySecretsURL: URL {
+        guard let string = defaults.object(forKey: Key.spotifySecretsURL) as? String,
+            let url = URL(string: string), url.scheme == "https", url.host() != nil
+        else { return Self.defaultSpotifySecretsURL }
+        return url
     }
 
     @ObservationIgnored private let defaults: UserDefaults

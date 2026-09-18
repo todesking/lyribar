@@ -5,11 +5,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let playbackMonitor = PlaybackMonitor()
     private let lyricsCache = LyricsCache()
     private let settings = Settings()
+    private let spotifyCredentials = KeychainSpotifyCredentialStore()
+    private lazy var spotifyTokens = SpotifyTokenProvider(
+        credentials: spotifyCredentials, secretsURL: settings.spotifySecretsURL)
+    // Spotify first: it is looked up by track ID, and it is skipped while no cookie is stored.
     private lazy var lyricsResolver = LyricsResolver(
-        provider: LyricsProviderChain(providers: [LRCLibProvider()]), cache: lyricsCache)
+        provider: LyricsProviderChain(providers: [
+            SpotifyLyricsProvider(tokenProvider: spotifyTokens), LRCLibProvider(),
+        ]),
+        cache: lyricsCache)
     private lazy var launchAtLogin = LaunchAtLoginController(settings: settings)
+    private lazy var spotifyAccount = SpotifyAccountController(
+        credentials: spotifyCredentials, verifier: spotifyTokens)
     private lazy var settingsWindow = SettingsWindowController(
-        settings: settings, launchAtLogin: launchAtLogin, cache: lyricsCache)
+        settings: settings, launchAtLogin: launchAtLogin, spotify: spotifyAccount, cache: lyricsCache)
     private var statusItemController: StatusItemController?
     private var resolvedTrack: TrackInfo?
 
@@ -19,6 +28,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // The login item may have been removed in System Settings since the last run.
         launchAtLogin.syncFromSystem()
+
+        // A saved or removed cookie changes where the lyrics of the current track come from.
+        spotifyAccount.onChange = { [weak self] in
+            self?.lyricsResolver.retry()
+        }
 
         let controller = StatusItemController(
             monitor: playbackMonitor, resolver: lyricsResolver, settings: settings)

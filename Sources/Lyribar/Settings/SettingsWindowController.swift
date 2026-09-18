@@ -8,6 +8,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     private let settings: Settings
     private let launchAtLogin: LaunchAtLoginController
+    private let spotify: SpotifyAccountController
     private let cache: LyricsCache
     private let activation: any ActivationService
     private var isOpen = false
@@ -16,11 +17,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private(set) var window: NSWindow?
 
     init(
-        settings: Settings, launchAtLogin: LaunchAtLoginController, cache: LyricsCache,
+        settings: Settings, launchAtLogin: LaunchAtLoginController,
+        spotify: SpotifyAccountController, cache: LyricsCache,
         activation: any ActivationService = SystemActivationService()
     ) {
         self.settings = settings
         self.launchAtLogin = launchAtLogin
+        self.spotify = spotify
         self.cache = cache
         self.activation = activation
     }
@@ -73,7 +76,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     func prepareWindow() -> NSWindow {
         if let window { return window }
         let hosting = NSHostingController(
-            rootView: SettingsView(settings: settings, launchAtLogin: launchAtLogin, cache: cache))
+            rootView: SettingsView(
+                settings: settings, launchAtLogin: launchAtLogin, spotify: spotify, cache: cache))
         hosting.sizingOptions = [.preferredContentSize]
         let window = NSWindow(contentViewController: hosting)
         window.title = Self.title

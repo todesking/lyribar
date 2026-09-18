@@ -16,11 +16,18 @@ struct SettingsView: View {
         (.currentLine, "Current line only"),
     ]
 
+    static let spotifyTitle = "Spotify lyrics (unofficial)"
+    static let spotifyCookiePrompt = "sp_dc cookie"
+    static let spotifyFooter =
+        "Uses your Spotify web session to fetch the lyrics Spotify shows. Unofficial and may stop working. Falls back to LRCLIB."
+
     @Bindable var settings: Settings
     let launchAtLogin: LaunchAtLoginController
+    let spotify: SpotifyAccountController
     let cache: LyricsCache
 
     @State private var cacheSize = 0
+    @State private var spotifyCookie = ""
 
     var body: some View {
         Form {
@@ -53,6 +60,32 @@ struct SettingsView: View {
             }
 
             Section {
+                if let status = SpotifyAccountController.statusText(spotify.state) {
+                    HStack {
+                        Text(status)
+                            .foregroundStyle(Self.isSpotifyProblem(spotify.state) ? .red : .secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer()
+                        Button("Remove") { spotify.remove() }
+                    }
+                } else {
+                    HStack {
+                        SecureField(
+                            Self.spotifyCookiePrompt, text: $spotifyCookie,
+                            prompt: Text(Self.spotifyCookiePrompt)
+                        )
+                        .labelsHidden()
+                        Button("Save") { saveSpotifyCookie() }
+                            .disabled(!Self.canSaveSpotifyCookie(spotifyCookie))
+                    }
+                }
+            } header: {
+                Text(Self.spotifyTitle)
+            } footer: {
+                Text(Self.spotifyFooter)
+            }
+
+            Section {
                 HStack {
                     Button("Clear lyrics cache") {
                         cache.clear()
@@ -69,7 +102,26 @@ struct SettingsView: View {
         .onAppear {
             launchAtLogin.syncFromSystem()
             cacheSize = cache.totalSize()
+            Task { await spotify.refresh() }
         }
+    }
+
+    static func canSaveSpotifyCookie(_ input: String) -> Bool {
+        SpotifyCookie.normalize(input) != nil
+    }
+
+    static func isSpotifyProblem(_ state: SpotifyAccountController.State) -> Bool {
+        switch state {
+        case .rejected, .unverified: true
+        case .notConfigured, .checking, .connected: false
+        }
+    }
+
+    // The field is emptied right away: the cookie should not linger on screen while it is checked.
+    private func saveSpotifyCookie() {
+        let input = spotifyCookie
+        spotifyCookie = ""
+        Task { await spotify.save(input) }
     }
 
     // Writing through the controller instead of the setting: a failed registration must leave the
