@@ -17,7 +17,6 @@ final class LyricsResolver {
 
     @ObservationIgnored private let provider: any LyricsProvider
     @ObservationIgnored private let cache: LyricsCache
-    @ObservationIgnored private let source: String
     @ObservationIgnored private let retryDelay: Duration
     @ObservationIgnored private let sleep: @Sendable (Duration) async throws -> Void
     @ObservationIgnored private(set) var track: TrackInfo?
@@ -30,13 +29,11 @@ final class LyricsResolver {
     init(
         provider: any LyricsProvider = LRCLibProvider(),
         cache: LyricsCache = LyricsCache(),
-        source: String = LRCLibProvider.source,
         retryDelay: Duration = .seconds(30),
         sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
     ) {
         self.provider = provider
         self.cache = cache
-        self.source = source
         self.retryDelay = retryDelay
         self.sleep = sleep
     }
@@ -67,21 +64,21 @@ final class LyricsResolver {
 
     private func start(_ track: TrackInfo) {
         if let cached = cache.get(track) {
-            status = .found(cached, source: source)
+            status = .found(cached.lyrics, source: cached.source)
             return
         }
         status = .loading
-        fetchTask = Task { [provider, cache, source] in
+        fetchTask = Task { [provider, cache] in
             do {
-                let lyrics = try await provider.fetch(track)
+                let fetched = try await provider.fetch(track)
                 guard !Task.isCancelled, track.isSameTrack(as: self.track) else { return }
-                guard let lyrics else {
+                guard let fetched else {
                     // A miss is not cached in v1.
                     status = .notFound
                     return
                 }
-                cache.set(track, lyrics: lyrics, source: source)
-                status = .found(lyrics, source: source)
+                cache.set(track, lyrics: fetched.lyrics, source: fetched.source)
+                status = .found(fetched.lyrics, source: fetched.source)
             } catch {
                 guard !Task.isCancelled, !(error is CancellationError),
                     track.isSameTrack(as: self.track)

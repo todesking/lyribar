@@ -16,21 +16,26 @@ private actor RecordingProvider: LyricsProvider {
     }
 
     private var outcomes: [Outcome]
+    private let source: String
     private(set) var requested: [String] = []
 
-    init(_ outcome: Outcome) { outcomes = [outcome] }
-
-    /// The last outcome repeats once the script runs out.
-    init(_ outcomes: [Outcome]) {
-        precondition(!outcomes.isEmpty)
-        self.outcomes = outcomes
+    init(_ outcome: Outcome, source: String = "test") {
+        outcomes = [outcome]
+        self.source = source
     }
 
-    func fetch(_ track: TrackInfo) async throws -> SyncedLyrics? {
+    /// The last outcome repeats once the script runs out.
+    init(_ outcomes: [Outcome], source: String = "test") {
+        precondition(!outcomes.isEmpty)
+        self.outcomes = outcomes
+        self.source = source
+    }
+
+    func fetch(_ track: TrackInfo) async throws -> FetchedLyrics? {
         requested.append(track.id)
         let outcome = outcomes.count == 1 ? outcomes[0] : outcomes.removeFirst()
         switch outcome {
-        case .found(let lyrics): return lyrics
+        case .found(let lyrics): return FetchedLyrics(lyrics: lyrics, source: source)
         case .missing: return nil
         case .failing: throw FakeError.boom
         }
@@ -40,11 +45,11 @@ private actor RecordingProvider: LyricsProvider {
 /// Fetches suspend until the test completes them, and ignore cancellation, so the resolver's
 /// "is this result still for the current track?" check can be exercised directly.
 private actor GatedProvider: LyricsProvider {
-    private var continuations: [String: CheckedContinuation<SyncedLyrics?, Never>] = [:]
-    private var completed: [String: SyncedLyrics?] = [:]
+    private var continuations: [String: CheckedContinuation<FetchedLyrics?, Never>] = [:]
+    private var completed: [String: FetchedLyrics?] = [:]
     private(set) var requested: [String] = []
 
-    func fetch(_ track: TrackInfo) async throws -> SyncedLyrics? {
+    func fetch(_ track: TrackInfo) async throws -> FetchedLyrics? {
         requested.append(track.id)
         return await withCheckedContinuation { continuation in
             if let result = completed.removeValue(forKey: track.id) {
@@ -55,11 +60,12 @@ private actor GatedProvider: LyricsProvider {
         }
     }
 
-    func complete(_ id: String, with lyrics: SyncedLyrics?) {
+    func complete(_ id: String, with lyrics: SyncedLyrics?, source: String = "test") {
+        let fetched = lyrics.map { FetchedLyrics(lyrics: $0, source: source) }
         if let continuation = continuations.removeValue(forKey: id) {
-            continuation.resume(returning: lyrics)
+            continuation.resume(returning: fetched)
         } else {
-            completed[id] = lyrics
+            completed[id] = fetched
         }
     }
 
@@ -148,7 +154,7 @@ struct LyricsResolverTests {
     @Test func nilTrackIsIdle() async {
         let cache = makeCache()
         defer { remove(cache) }
-        let resolver = LyricsResolver(provider: RecordingProvider(.missing), cache: cache, source: "test")
+        let resolver = LyricsResolver(provider: RecordingProvider(.missing), cache: cache)
 
         resolver.resolve(track: nil)
 
@@ -161,34 +167,59 @@ struct LyricsResolverTests {
         defer { remove(cache) }
         cache.set(trackA, lyrics: lyricsA, source: "lrclib")
         let provider = RecordingProvider(.found(lyricsB))
-        let resolver = LyricsResolver(provider: provider, cache: cache, source: "test")
+        let resolver = LyricsResolver(provider: provider, cache: cache)
 
         resolver.resolve(track: trackA)
 
         #expect(resolver.status.foundLines == lyricsA.lines)
-        #expect(resolver.status.foundSource == "test")
+        #expect(resolver.status.foundSource == "lrclib")
         #expect(resolver.fetchTask == nil)
         #expect(await provider.requested.isEmpty)
+    }
+
+    @Test func cacheHitReportsTheStoredSource() async {
+        let cache = makeCache()
+        defer { remove(cache) }
+        cache.set(trackA, lyrics: lyricsA, source: "spotify")
+        let resolver = LyricsResolver(
+            provider: RecordingProvider(.found(lyricsB), source: "lrclib"), cache: cache)
+
+        resolver.resolve(track: trackA)
+
+        #expect(resolver.status.foundSource == "spotify")
+    }
+
+    @Test func fetchedSourceIsReportedAndCached() async {
+        let cache = makeCache()
+        defer { remove(cache) }
+        let resolver = LyricsResolver(
+            provider: RecordingProvider(.found(lyricsA), source: "spotify"), cache: cache)
+
+        resolver.resolve(track: trackA)
+        await resolver.fetchTask?.value
+
+        #expect(resolver.status.foundSource == "spotify")
+        #expect(cache.get(trackA)?.source == "spotify")
     }
 
     @Test func providerResultIsStoredInCache() async {
         let cache = makeCache()
         defer { remove(cache) }
         let resolver = LyricsResolver(
-            provider: RecordingProvider(.found(lyricsA)), cache: cache, source: "test")
+            provider: RecordingProvider(.found(lyricsA)), cache: cache)
 
         resolver.resolve(track: trackA)
         #expect(resolver.status.isLoading)
         await resolver.fetchTask?.value
 
         #expect(resolver.status.foundLines == lyricsA.lines)
-        #expect(cache.get(trackA)?.lines == lyricsA.lines)
+        #expect(cache.get(trackA)?.lyrics.lines == lyricsA.lines)
     }
 
     @Test func missIsReportedAndNotCached() async {
         let cache = makeCache()
         defer { remove(cache) }
-        let resolver = LyricsResolver(provider: RecordingProvider(.missing), cache: cache, source: "test")
+        let resolver = LyricsResolver(provider: RecordingProvider(.missing), cache: cache)
 
         resolver.resolve(track: trackA)
         await resolver.fetchTask?.value
@@ -201,7 +232,7 @@ struct LyricsResolverTests {
     @Test func failureIsReported() async {
         let cache = makeCache()
         defer { remove(cache) }
-        let resolver = LyricsResolver(provider: RecordingProvider(.failing), cache: cache, source: "test")
+        let resolver = LyricsResolver(provider: RecordingProvider(.failing), cache: cache)
 
         resolver.resolve(track: trackA)
         await resolver.fetchTask?.value
@@ -215,7 +246,7 @@ struct LyricsResolverTests {
         let cache = makeCache()
         defer { remove(cache) }
         let provider = RecordingProvider(.found(lyricsA))
-        let resolver = LyricsResolver(provider: provider, cache: cache, source: "test")
+        let resolver = LyricsResolver(provider: provider, cache: cache)
 
         resolver.resolve(track: trackA)
         await resolver.fetchTask?.value
@@ -231,7 +262,7 @@ struct LyricsResolverTests {
         let cache = makeCache()
         defer { remove(cache) }
         let provider = GatedProvider()
-        let resolver = LyricsResolver(provider: provider, cache: cache, source: "test")
+        let resolver = LyricsResolver(provider: provider, cache: cache)
 
         resolver.resolve(track: trackA)
         #expect(await provider.waitForRequest("a"))
@@ -251,7 +282,7 @@ struct LyricsResolverTests {
         let cache = makeCache()
         defer { remove(cache) }
         let provider = GatedProvider()
-        let resolver = LyricsResolver(provider: provider, cache: cache, source: "test")
+        let resolver = LyricsResolver(provider: provider, cache: cache)
 
         resolver.resolve(track: trackA)
         #expect(await provider.waitForRequest("a"))
@@ -273,7 +304,7 @@ struct LyricsResolverTests {
         defer { remove(cache) }
         let provider = RecordingProvider([.failing, .found(lyricsA)])
         let resolver = LyricsResolver(
-            provider: provider, cache: cache, source: "test", sleep: instantSleep)
+            provider: provider, cache: cache, sleep: instantSleep)
 
         resolver.resolve(track: trackA)
         // The retry runs as soon as the first attempt fails, so the failed status is transient here.
@@ -291,7 +322,7 @@ struct LyricsResolverTests {
         defer { remove(cache) }
         let provider = RecordingProvider(.failing)
         let resolver = LyricsResolver(
-            provider: provider, cache: cache, source: "test", sleep: instantSleep)
+            provider: provider, cache: cache, sleep: instantSleep)
 
         resolver.resolve(track: trackA)
         await resolver.fetchTask?.value
@@ -310,7 +341,7 @@ struct LyricsResolverTests {
         let gate = SleepGate()
         let provider = RecordingProvider([.failing, .found(lyricsA)])
         let resolver = LyricsResolver(
-            provider: provider, cache: cache, source: "test", retryDelay: .seconds(30),
+            provider: provider, cache: cache, retryDelay: .seconds(30),
             sleep: gate.sleep)
 
         resolver.resolve(track: trackA)
@@ -334,7 +365,7 @@ struct LyricsResolverTests {
         let gate = SleepGate()
         let provider = RecordingProvider([.failing, .found(lyricsB)])
         let resolver = LyricsResolver(
-            provider: provider, cache: cache, source: "test", sleep: gate.sleep)
+            provider: provider, cache: cache, sleep: gate.sleep)
 
         resolver.resolve(track: trackA)
         await resolver.fetchTask?.value
@@ -356,7 +387,7 @@ struct LyricsResolverTests {
         let gate = SleepGate()  // the automatic retry stays parked
         let provider = RecordingProvider([.failing, .found(lyricsA)])
         let resolver = LyricsResolver(
-            provider: provider, cache: cache, source: "test", sleep: gate.sleep)
+            provider: provider, cache: cache, sleep: gate.sleep)
 
         resolver.resolve(track: trackA)
         await resolver.fetchTask?.value

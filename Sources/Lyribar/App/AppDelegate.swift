@@ -5,7 +5,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let playbackMonitor = PlaybackMonitor()
     private let lyricsCache = LyricsCache()
     private let settings = Settings()
-    private lazy var lyricsResolver = LyricsResolver(provider: LRCLibProvider(), cache: lyricsCache)
+    private lazy var lyricsResolver = LyricsResolver(
+        provider: LyricsProviderChain(providers: [LRCLibProvider()]), cache: lyricsCache)
     private lazy var launchAtLogin = LaunchAtLoginController(settings: settings)
     private lazy var settingsWindow = SettingsWindowController(
         settings: settings, launchAtLogin: launchAtLogin, cache: lyricsCache)

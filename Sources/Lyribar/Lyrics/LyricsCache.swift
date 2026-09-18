@@ -27,12 +27,12 @@ struct LyricsCache: Sendable {
         self.directory = directory
     }
 
-    func get(_ track: TrackInfo) -> SyncedLyrics? {
+    func get(_ track: TrackInfo) -> FetchedLyrics? {
         guard let data = try? Data(contentsOf: fileURL(for: track)),
             let entry = try? Self.decoder.decode(CacheEntry.self, from: data),
             !entry.lines.isEmpty
         else { return nil }
-        return SyncedLyrics(lines: entry.lines)
+        return FetchedLyrics(lyrics: SyncedLyrics(lines: entry.lines), source: entry.source)
     }
 
     func set(_ track: TrackInfo, lyrics: SyncedLyrics, source: String, fetchedAt: Date = Date()) {

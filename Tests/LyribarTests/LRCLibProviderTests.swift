@@ -59,9 +59,10 @@ struct LRCLibProviderTests {
             (200, self.body(#"{"syncedLyrics":"[00:12.00]Hello","plainLyrics":"Hello"}"#))
         }
 
-        let lyrics = try await provider.fetch(track)
+        let fetched = try await provider.fetch(track)
 
-        #expect(lyrics?.lines == [LyricLine(time: 12, text: "Hello")])
+        #expect(fetched?.lyrics.lines == [LyricLine(time: 12, text: "Hello")])
+        #expect(fetched?.source == LRCLibProvider.source)
         let requests = StubURLProtocol.recordedRequests
         #expect(requests.count == 1)
         let url = try #require(requests.first?.url)
@@ -79,9 +80,9 @@ struct LRCLibProviderTests {
             (200, self.body(#"{"syncedLyrics":null,"plainLyrics":"Hello","instrumental":false}"#))
         }
 
-        let lyrics = try await provider.fetch(track)
+        let fetched = try await provider.fetch(track)
 
-        #expect(lyrics == nil)
+        #expect(fetched == nil)
         #expect(StubURLProtocol.recordedRequests.count == 1)
     }
 
@@ -101,9 +102,9 @@ struct LRCLibProviderTests {
             )
         }
 
-        let lyrics = try await provider.fetch(track)
+        let fetched = try await provider.fetch(track)
 
-        #expect(lyrics?.lines == [LyricLine(time: 5, text: "Second")])
+        #expect(fetched?.lyrics.lines == [LyricLine(time: 5, text: "Second")])
         let requests = StubURLProtocol.recordedRequests
         #expect(requests.count == 2)
         let url = try #require(requests.last?.url)
@@ -160,9 +161,9 @@ struct LRCLibProviderTests {
             return (200, self.body(#"{"syncedLyrics":"[00:12.00]Hello"}"#))
         }
 
-        let lyrics = try await provider.fetch(track)
+        let fetched = try await provider.fetch(track)
 
-        #expect(lyrics?.lines == [LyricLine(time: 12, text: "Hello")])
+        #expect(fetched?.lyrics.lines == [LyricLine(time: 12, text: "Hello")])
         #expect(StubURLProtocol.recordedRequests.count == 2)
         #expect(await sleep.delays == [.milliseconds(500)])
     }
@@ -190,9 +191,9 @@ struct LRCLibProviderTests {
             return (200, self.body(#"[{"syncedLyrics":"[00:05.00]Second"}]"#))
         }
 
-        let lyrics = try await provider.fetch(track)
+        let fetched = try await provider.fetch(track)
 
-        #expect(lyrics?.lines == [LyricLine(time: 5, text: "Second")])
+        #expect(fetched?.lyrics.lines == [LyricLine(time: 5, text: "Second")])
         #expect(StubURLProtocol.recordedRequests.count == 3)
     }
 
@@ -203,9 +204,9 @@ struct LRCLibProviderTests {
             return .response(status: 200, body: self.body(#"{"syncedLyrics":"[00:12.00]Hello"}"#))
         })
 
-        let lyrics = try await provider.fetch(track)
+        let fetched = try await provider.fetch(track)
 
-        #expect(lyrics?.lines == [LyricLine(time: 12, text: "Hello")])
+        #expect(fetched?.lyrics.lines == [LyricLine(time: 12, text: "Hello")])
         #expect(StubURLProtocol.recordedRequests.count == 2)
         #expect(await sleep.delays == [.milliseconds(500)])
     }

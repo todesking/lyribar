@@ -52,7 +52,12 @@ struct LRCLibProvider: LyricsProvider {
         return "Lyribar/\(version) (https://github.com/todesking/lyribar)"
     }
 
-    func fetch(_ track: TrackInfo) async throws -> SyncedLyrics? {
+    func fetch(_ track: TrackInfo) async throws -> FetchedLyrics? {
+        guard let lyrics = try await lyrics(for: track) else { return nil }
+        return FetchedLyrics(lyrics: lyrics, source: Self.source)
+    }
+
+    private func lyrics(for track: TrackInfo) async throws -> SyncedLyrics? {
         let request = try makeRequest(
             path: "/api/get",
             query: [
