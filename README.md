@@ -60,6 +60,8 @@ Clicking anywhere on the status item opens the menu:
 - **Clear lyrics cache** — deletes the cached lyrics; the current size is shown
   next to the button.
 
+The settings window closes with the close button or ⌘W.
+
 ## Troubleshooting
 
 **Only the icon shows, and the menu says "Not playing".** Lyribar only follows

@@ -13,6 +13,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var resolvedTrack: TrackInfo?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Makes Cmd+W close the settings window; see makeMainMenu().
+        NSApplication.shared.mainMenu = makeMainMenu()
+
         // The login item may have been removed in System Settings since the last run.
         launchAtLogin.syncFromSystem()
 
