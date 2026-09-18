@@ -23,6 +23,11 @@ private final class ManualScheduler {
 }
 
 @MainActor
+private final class Recorder {
+    var opened = 0
+}
+
+@MainActor
 struct StatusItemControllerTests {
     private func makeController() -> (StatusItemController, Settings, ManualScheduler, () -> Void) {
         let suite = "LyribarTests.\(UUID().uuidString)"
@@ -39,19 +44,25 @@ struct StatusItemControllerTests {
         return (controller, settings, scheduler, { defaults.removePersistentDomain(forName: suite) })
     }
 
-    @Test func settingsMenuItemReachesTheHandler() {
+    // The menu defers the handler to the main queue, so this waits for that hop.
+    @Test func settingsMenuItemReachesTheHandler() async {
         let (controller, _, _, cleanup) = makeController()
         defer { cleanup() }
-        var opened = 0
-        controller.onOpenSettings = { opened += 1 }
+        let recorder = Recorder()
+        controller.onOpenSettings = { recorder.opened += 1 }
 
         let item = controller.menu.menu.item(withTitle: "Settings…")
         #expect(item?.isEnabled == true)
         if let item, let action = item.action {
             _ = (item.target as? NSObject)?.perform(action, with: item)
         }
+        // Time-based: the scheduled work is a main queue hop, and other suites can keep it busy.
+        let deadline = ContinuousClock.now + .seconds(5)
+        while ContinuousClock.now < deadline, recorder.opened == 0 {
+            try? await Task.sleep(for: .milliseconds(1))
+        }
 
-        #expect(opened == 1)
+        #expect(recorder.opened == 1)
     }
 
     @Test func maxWidthChangeReachesTheBarView() {

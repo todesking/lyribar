@@ -19,8 +19,16 @@ final class SettingsWindowController {
 
     func show() {
         let window = prepareWindow()
-        // An LSUIElement app is never active, and an inactive app's window opens behind the others.
-        NSApplication.shared.activate()
+        // An accessory app is never active, and an inactive app's window opens behind the others.
+        // orderFrontRegardless() puts the window on screen even while the app is still inactive;
+        // activate(ignoringOtherApps:) then pulls the app in front of whatever was frontmost.
+        // The plain activate() is cooperative -- the frontmost app has to yield, which it does not
+        // always do right after a status-bar menu closes -- and the NSRunningApplication option
+        // that used to force activation has had no effect since macOS 14, so the (only soft-)
+        // deprecated NSApplication call is the one that still works. makeKeyAndOrderFront(nil)
+        // comes last, when the app is active and the window can actually take key focus.
+        window.orderFrontRegardless()
+        NSApplication.shared.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
     }
 

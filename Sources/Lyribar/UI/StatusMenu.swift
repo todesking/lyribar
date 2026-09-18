@@ -3,13 +3,22 @@ import AppKit
 // Owns the NSMenu instead of subclassing it: NSMenu's designated initializer is nonisolated.
 @MainActor
 final class StatusMenu: NSObject {
+    typealias Schedule = @MainActor (@escaping @MainActor () -> Void) -> Void
+
+    /// Runs the work after the menu tracking loop has finished dismissing the menu.
+    static let afterMenuTracking: Schedule = { work in
+        DispatchQueue.main.async { MainActor.assumeIsolated(work) }
+    }
+
     let menu = NSMenu(title: "Lyribar")
     var onOpenSettings: (() -> Void)?
 
     private let trackItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let lyricsItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    private let schedule: Schedule
 
-    override init() {
+    init(schedule: @escaping Schedule = StatusMenu.afterMenuTracking) {
+        self.schedule = schedule
         super.init()
         menu.autoenablesItems = false
         trackItem.isEnabled = false
@@ -54,7 +63,8 @@ final class StatusMenu: NSObject {
         source == LRCLibProvider.source ? "LRCLIB" : source
     }
 
+    // Deferred by one turn: activating the app while the menu is still tracking does not stick.
     @objc private func openSettings(_ sender: Any?) {
-        onOpenSettings?()
+        schedule { [weak self] in self?.onOpenSettings?() }
     }
 }
