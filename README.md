@@ -34,12 +34,14 @@ Settings > Privacy & Security > Automation > Lyribar**.
 ## Usage
 
 Start Spotify and play something. The status item shows the current lyric line,
-then the track and artist, then the Lyribar icon. When the line is too wide for
-the configured maximum width it scrolls back and forth; the track and artist are
-truncated instead. When there is no line to show — no lyrics for the track, or an
-instrumental passage — the track and artist stay on their own, and when Spotify
-is not running or playback is stopped only the icon is left. A paused track keeps
-its last line on screen.
+then the track and artist, then the Lyribar icon. While the track has lyrics the
+item keeps the configured maximum width, so the rest of the menu bar does not
+shift from line to line: a line that is too wide scrolls back and forth, a short
+one sits at the left, and an instrumental passage leaves the space empty. The
+track and artist are truncated instead of scrolling. Without lyrics for the track
+the item shrinks to the track and artist, and when Spotify is not running or
+playback is stopped only the icon is left. A paused track keeps its last line on
+screen.
 
 Clicking anywhere on the status item opens the menu:
 
