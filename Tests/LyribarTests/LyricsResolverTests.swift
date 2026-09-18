@@ -5,6 +5,9 @@ import Testing
 
 private enum FakeError: Error { case boom }
 
+/// The automatic retry fires at once; the wait itself is covered with a `SleepGate`.
+private let instantSleep: @Sendable (Duration) async throws -> Void = { _ in }
+
 private actor RecordingProvider: LyricsProvider {
     enum Outcome: Sendable {
         case found(SyncedLyrics)
@@ -12,13 +15,20 @@ private actor RecordingProvider: LyricsProvider {
         case failing
     }
 
-    private let outcome: Outcome
+    private var outcomes: [Outcome]
     private(set) var requested: [String] = []
 
-    init(_ outcome: Outcome) { self.outcome = outcome }
+    init(_ outcome: Outcome) { outcomes = [outcome] }
+
+    /// The last outcome repeats once the script runs out.
+    init(_ outcomes: [Outcome]) {
+        precondition(!outcomes.isEmpty)
+        self.outcomes = outcomes
+    }
 
     func fetch(_ track: TrackInfo) async throws -> SyncedLyrics? {
         requested.append(track.id)
+        let outcome = outcomes.count == 1 ? outcomes[0] : outcomes.removeFirst()
         switch outcome {
         case .found(let lyrics): return lyrics
         case .missing: return nil
@@ -61,6 +71,49 @@ private actor GatedProvider: LyricsProvider {
             try? await Task.sleep(for: .milliseconds(1))
         }
         return requested.contains(id)
+    }
+}
+
+/// Stands in for the wait before the automatic retry: the test decides when it ends, so no real
+/// time passes.
+private actor SleepGate {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var released = false
+    private(set) var requested: [Duration] = []
+
+    nonisolated var sleep: @Sendable (Duration) async throws -> Void {
+        { await self.wait($0) }
+    }
+
+    private func wait(_ duration: Duration) async {
+        requested.append(duration)
+        await withCheckedContinuation { continuation in
+            if released {
+                released = false
+                continuation.resume()
+            } else {
+                self.continuation = continuation
+            }
+        }
+    }
+
+    func release() {
+        if let continuation {
+            self.continuation = nil
+            continuation.resume()
+        } else {
+            released = true
+        }
+    }
+
+    func waitForSleep() async -> Bool {
+        // Time-based: the retry is scheduled on the main actor, which other suites may keep busy.
+        let deadline = ContinuousClock.now + .seconds(5)
+        while ContinuousClock.now < deadline {
+            if !requested.isEmpty { return true }
+            try? await Task.sleep(for: .milliseconds(1))
+        }
+        return !requested.isEmpty
     }
 }
 
@@ -154,6 +207,7 @@ struct LyricsResolverTests {
         await resolver.fetchTask?.value
 
         #expect(resolver.status.failure is FakeError)
+        resolver.resolve(track: nil)  // drops the automatic retry this scheduled
     }
 
     // Spotify revises the duration of the track already playing; that is not a track change.
@@ -212,5 +266,108 @@ struct LyricsResolverTests {
         await provider.complete("b", with: lyricsB)
         await resolver.fetchTask?.value
         #expect(resolver.status.foundLines == lyricsB.lines)
+    }
+
+    @Test func transientFailureIsRetriedAutomatically() async {
+        let cache = makeCache()
+        defer { remove(cache) }
+        let provider = RecordingProvider([.failing, .found(lyricsA)])
+        let resolver = LyricsResolver(
+            provider: provider, cache: cache, source: "test", sleep: instantSleep)
+
+        resolver.resolve(track: trackA)
+        // The retry runs as soon as the first attempt fails, so the failed status is transient here.
+        await resolver.fetchTask?.value
+        await resolver.retryTask?.value
+        await resolver.fetchTask?.value
+
+        #expect(resolver.status.foundLines == lyricsA.lines)
+        #expect(await provider.requested == ["a", "a"])
+    }
+
+    // A failure that keeps failing must not become an endless stream of requests.
+    @Test func repeatedFailureIsNotRetriedAgain() async {
+        let cache = makeCache()
+        defer { remove(cache) }
+        let provider = RecordingProvider(.failing)
+        let resolver = LyricsResolver(
+            provider: provider, cache: cache, source: "test", sleep: instantSleep)
+
+        resolver.resolve(track: trackA)
+        await resolver.fetchTask?.value
+        await resolver.retryTask?.value
+        await resolver.fetchTask?.value
+
+        #expect(resolver.status.failure is FakeError)
+        // Give any further retry that was scheduled the chance to run.
+        for _ in 0..<50 { await Task.yield() }
+        #expect(await provider.requested == ["a", "a"])
+    }
+
+    @Test func retryWaitsForTheRetryDelay() async {
+        let cache = makeCache()
+        defer { remove(cache) }
+        let gate = SleepGate()
+        let provider = RecordingProvider([.failing, .found(lyricsA)])
+        let resolver = LyricsResolver(
+            provider: provider, cache: cache, source: "test", retryDelay: .seconds(30),
+            sleep: gate.sleep)
+
+        resolver.resolve(track: trackA)
+        await resolver.fetchTask?.value
+        #expect(await gate.waitForSleep())
+        #expect(await gate.requested == [.seconds(30)])
+        #expect(await provider.requested == ["a"])
+        #expect(resolver.status.failure is FakeError)
+
+        await gate.release()
+        await resolver.retryTask?.value
+        await resolver.fetchTask?.value
+
+        #expect(resolver.status.foundLines == lyricsA.lines)
+        #expect(await provider.requested == ["a", "a"])
+    }
+
+    @Test func trackChangeCancelsThePendingRetry() async {
+        let cache = makeCache()
+        defer { remove(cache) }
+        let gate = SleepGate()
+        let provider = RecordingProvider([.failing, .found(lyricsB)])
+        let resolver = LyricsResolver(
+            provider: provider, cache: cache, source: "test", sleep: gate.sleep)
+
+        resolver.resolve(track: trackA)
+        await resolver.fetchTask?.value
+        #expect(await gate.waitForSleep())
+
+        resolver.resolve(track: trackB)
+        #expect(resolver.retryTask == nil)
+        await resolver.fetchTask?.value
+        await gate.release()  // the cancelled retry gives up instead of fetching "a" again
+
+        #expect(resolver.status.foundLines == lyricsB.lines)
+        for _ in 0..<50 { await Task.yield() }
+        #expect(await provider.requested == ["a", "b"])
+    }
+
+    @Test func retryResolvesTheCurrentTrackAgain() async {
+        let cache = makeCache()
+        defer { remove(cache) }
+        let gate = SleepGate()  // the automatic retry stays parked
+        let provider = RecordingProvider([.failing, .found(lyricsA)])
+        let resolver = LyricsResolver(
+            provider: provider, cache: cache, source: "test", sleep: gate.sleep)
+
+        resolver.resolve(track: trackA)
+        await resolver.fetchTask?.value
+        #expect(await gate.waitForSleep())
+
+        resolver.retry()
+        await resolver.fetchTask?.value
+
+        #expect(resolver.status.foundLines == lyricsA.lines)
+        #expect(await provider.requested == ["a", "a"])
+        resolver.resolve(track: nil)
+        await gate.release()
     }
 }
