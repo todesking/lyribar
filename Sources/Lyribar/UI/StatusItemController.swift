@@ -87,6 +87,11 @@ final class StatusItemController {
     private func tick(now: Date) {
         let state = monitor.state
         let status = effectiveStatus(state: state, resolvedTrack: resolver.track, status: resolver.status)
+        render(state: state, status: status, now: now)
+    }
+
+    // Internal so tests can drive the rendering without Spotify running.
+    func render(state: PlaybackState, status: LyricsResolver.Status, now: Date) {
         let lineIndex = currentLineIndex(state: state, status: status, now: now)
         let snapshot = Snapshot(
             content: barContent(state: state, status: status, lineIndex: lineIndex, settings: settings),
@@ -100,9 +105,17 @@ final class StatusItemController {
         menu.update(track: state.track, status: status)
         if let barView {
             barView.update(content: snapshot.content, maxWidth: snapshot.maxWidth)
-            statusItem?.length = barView.preferredWidth
+            let width = barView.preferredWidth
+            // Resizing the status item shifts every item to its left, so only do it when the width
+            // really changed.
+            if let statusItem, statusItem.length != width {
+                statusItem.length = width
+            }
             if let button = statusItem?.button {
-                barView.frame = NSRect(x: 0, y: 0, width: barView.preferredWidth, height: button.bounds.height)
+                let frame = NSRect(x: 0, y: 0, width: width, height: button.bounds.height)
+                if barView.frame != frame {
+                    barView.frame = frame
+                }
             }
         }
     }

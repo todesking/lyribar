@@ -32,17 +32,17 @@ struct BarContentTests {
 
     @Test func showsCurrentLineAndTrackInfoWhilePlaying() {
         let content = barContent(state: state(), status: found, lineIndex: 0, settings: makeSettings())
-        #expect(content == BarContent(lyric: "first", trackInfo: "Song – Artist"))
+        #expect(content == BarContent(lyric: "first", trackInfo: "Song – Artist", reservesLyricWidth: true))
     }
 
     @Test func keepsCurrentLineWhilePaused() {
         let content = barContent(state: state(playing: false), status: found, lineIndex: 2, settings: makeSettings())
-        #expect(content == BarContent(lyric: "third", trackInfo: "Song – Artist"))
+        #expect(content == BarContent(lyric: "third", trackInfo: "Song – Artist", reservesLyricWidth: true))
     }
 
     @Test func hidesLyricForEmptyLine() {
         let content = barContent(state: state(), status: found, lineIndex: 1, settings: makeSettings())
-        #expect(content == BarContent(lyric: nil, trackInfo: "Song – Artist"))
+        #expect(content == BarContent(lyric: nil, trackInfo: "Song – Artist", reservesLyricWidth: true))
     }
 
     @Test func hidesLyricForWhitespaceOnlyLine() {
@@ -54,7 +54,7 @@ struct BarContentTests {
 
     @Test func hidesLyricBeforeFirstLine() {
         let content = barContent(state: state(), status: found, lineIndex: nil, settings: makeSettings())
-        #expect(content == BarContent(lyric: nil, trackInfo: "Song – Artist"))
+        #expect(content == BarContent(lyric: nil, trackInfo: "Song – Artist", reservesLyricWidth: true))
     }
 
     @Test func hidesLyricForOutOfRangeIndex() {
@@ -70,16 +70,33 @@ struct BarContentTests {
         }
     }
 
+    // The width stays reserved for every line of a track whose lyrics were found.
+    @Test func reservesLyricWidthWhileFound() {
+        for lineIndex in [nil, 0, 1, 2, 3] as [Int?] {
+            let content = barContent(state: state(), status: found, lineIndex: lineIndex, settings: makeSettings())
+            #expect(content.reservesLyricWidth)
+        }
+    }
+
+    @Test func doesNotReserveLyricWidthUnlessFound() {
+        let statuses: [LyricsResolver.Status] = [.idle, .loading, .notFound, .failed(StubError())]
+        for status in statuses {
+            let content = barContent(state: state(), status: status, lineIndex: 0, settings: makeSettings())
+            #expect(!content.reservesLyricWidth)
+        }
+    }
+
     @Test func emptyWithoutTrack() {
         let content = barContent(
             state: .empty(at: syncedAt), status: found, lineIndex: 0, settings: makeSettings())
         #expect(content == BarContent())
+        #expect(!content.reservesLyricWidth)
     }
 
     @Test func hidesTrackInfoWhenDisabled() {
         let content = barContent(
             state: state(), status: found, lineIndex: 0, settings: makeSettings(showTrackInfo: false))
-        #expect(content == BarContent(lyric: "first", trackInfo: nil))
+        #expect(content == BarContent(lyric: "first", trackInfo: nil, reservesLyricWidth: true))
     }
 
     @Test func trackInfoOmitsSeparatorWithoutArtist() {

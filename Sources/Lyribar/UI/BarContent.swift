@@ -3,6 +3,9 @@ import Foundation
 struct BarContent: Equatable {
     var lyric: String?
     var trackInfo: String?
+    /// Keep room for the lyric even when the current line is empty or missing, so that the bar does
+    /// not jitter between lines while the track has lyrics.
+    var reservesLyricWidth = false
 }
 
 extension TrackInfo {
@@ -12,6 +15,7 @@ extension TrackInfo {
 }
 
 /// The lyric is shown only while lyrics are found and the current line has text; it stays while paused.
+/// While the lyrics of the current track are found, the lyric width stays reserved even between lines.
 /// Without a track (Spotify not running, or stopped) nothing is shown.
 @MainActor
 func barContent(
@@ -26,10 +30,13 @@ func barContent(
     if settings.showTrackInfo {
         content.trackInfo = track.displayText
     }
-    if case .found(let lyrics, _) = status, let lineIndex, lyrics.lines.indices.contains(lineIndex) {
-        let text = lyrics.lines[lineIndex].text
-        if !text.allSatisfy(\.isWhitespace) {
-            content.lyric = text
+    if case .found(let lyrics, _) = status {
+        content.reservesLyricWidth = true
+        if let lineIndex, lyrics.lines.indices.contains(lineIndex) {
+            let text = lyrics.lines[lineIndex].text
+            if !text.allSatisfy(\.isWhitespace) {
+                content.lyric = text
+            }
         }
     }
     return content

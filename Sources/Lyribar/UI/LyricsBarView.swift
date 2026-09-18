@@ -55,7 +55,8 @@ final class LyricsBarView: NSView {
             // NSTextField draws its text inset from the frame.
             trackInfoWidth: content.trackInfo.map { _ in ceil(trackLabel.intrinsicContentSize.width) },
             iconWidth: Self.iconWidth,
-            maxWidth: maxWidth
+            maxWidth: maxWidth,
+            reservesLyricWidth: content.reservesLyricWidth
         )
         setFrameSize(NSSize(width: layoutResult.totalWidth, height: frame.height))
         needsLayout = true
