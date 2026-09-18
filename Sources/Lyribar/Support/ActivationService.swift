@@ -4,7 +4,7 @@ import AppKit
 /// protocol: tests drive the settings window with a fake instead of shuffling real apps around.
 @MainActor
 protocol ActivationService {
-    /// The app that holds focus right now, or nil when this app itself holds it.
+    /// The app that holds focus right now, this one included.
     func frontmostApplication() -> (any ActivatableApp)?
     /// Hides this app, which makes the system bring the app behind it forward.
     func hideSelf()
@@ -13,6 +13,8 @@ protocol ActivationService {
 /// An app focus can be handed back to.
 @MainActor
 protocol ActivatableApp {
+    /// True for Lyribar itself, which is never worth handing focus back to.
+    var isCurrentApp: Bool { get }
     var isTerminated: Bool { get }
     /// Returns false when the system turns the hand-off down.
     func activate() -> Bool
@@ -21,10 +23,7 @@ protocol ActivatableApp {
 @MainActor
 struct SystemActivationService: ActivationService {
     func frontmostApplication() -> (any ActivatableApp)? {
-        guard let app = NSWorkspace.shared.frontmostApplication,
-            app.processIdentifier != NSRunningApplication.current.processIdentifier
-        else { return nil }
-        return RunningApp(app)
+        NSWorkspace.shared.frontmostApplication.map(RunningApp.init)
     }
 
     func hideSelf() {
@@ -39,6 +38,10 @@ private struct RunningApp: ActivatableApp {
 
     init(_ app: NSRunningApplication) {
         self.app = app
+    }
+
+    var isCurrentApp: Bool {
+        app.processIdentifier == NSRunningApplication.current.processIdentifier
     }
 
     var isTerminated: Bool { app.isTerminated }
