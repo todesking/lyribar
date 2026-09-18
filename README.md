@@ -7,7 +7,7 @@ come from [LRCLIB](https://lrclib.net), so there is no account and no API key to
 set up. Optionally, Lyribar can also fetch the lyrics Spotify itself shows; see
 [Spotify lyrics](#spotify-lyrics-optional-unofficial).
 
-![Lyribar in the menu bar](docs/screenshot.png)
+![lyribar screen recording](docs/lyribar_screen.gif)
 
 ## Requirements
 
