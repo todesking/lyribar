@@ -17,8 +17,6 @@ private final class TestClock: @unchecked Sendable {
     }
 }
 
-// Serialized: StubURLProtocol keeps its handler in global state.
-@Suite(.serialized)
 struct SpotifyTokenProviderTests {
     private static let secretsURL = URL(string: "https://secrets.example/secretDict.json")!
     private static let cookie = "sp-dc-value"
@@ -62,10 +60,14 @@ struct SpotifyTokenProviderTests {
         }
     }
 
-    private func provider(_ handler: @escaping StubURLProtocol.Handler = handler()) -> SpotifyTokenProvider {
-        SpotifyTokenProvider(
-            session: StubURLProtocol.session(handler), credentials: credentials,
-            secretsURL: Self.secretsURL, now: clock.now)
+    private func provider(_ handler: @escaping StubURLProtocol.Handler = handler())
+        -> (SpotifyTokenProvider, StubURLProtocol.Stub)
+    {
+        let stub = StubURLProtocol.stub(handler)
+        let provider = SpotifyTokenProvider(
+            session: stub.session, credentials: credentials, secretsURL: Self.secretsURL,
+            now: clock.now)
+        return (provider, stub)
     }
 
     private func query(_ request: URLRequest) throws -> [String: String] {
@@ -75,23 +77,23 @@ struct SpotifyTokenProviderTests {
     }
 
     @Test func withoutACookieNothingIsRequested() async throws {
-        let credentials = InMemorySpotifyCredentialStore()
+        let stub = StubURLProtocol.stub(Self.handler())
         let provider = SpotifyTokenProvider(
-            session: StubURLProtocol.session(Self.handler()), credentials: credentials,
+            session: stub.session, credentials: InMemorySpotifyCredentialStore(),
             secretsURL: Self.secretsURL, now: clock.now)
 
         await #expect(throws: SpotifyAuthError.notConfigured) { _ = try await provider.token() }
 
-        #expect(StubURLProtocol.recordedRequests.isEmpty)
+        #expect(stub.requests.isEmpty)
     }
 
     @Test func fetchesATokenThroughAllThreeHops() async throws {
-        let provider = provider()
+        let (provider, stub) = provider()
 
         let token = try await provider.token()
 
         #expect(token == "token-1")
-        let requests = StubURLProtocol.recordedRequests
+        let requests = stub.requests
         #expect(requests.count == 3)
         #expect(requests.map { $0.url?.path } == ["/secretDict.json", "/api/server-time", "/api/token"])
         #expect(
@@ -117,12 +119,12 @@ struct SpotifyTokenProviderTests {
     }
 
     @Test func secretVersionsAreComparedAsNumbers() async throws {
-        let provider = provider(
+        let (provider, stub) = provider(
             Self.handler(secrets: (200, Data(#"{"9":[1,2,3],"10":[70,71,72,73,74,75]}"#.utf8))))
 
         _ = try await provider.token()
 
-        let query = try query(StubURLProtocol.recordedRequests[2])
+        let query = try query(stub.requests[2])
         #expect(query["totpVer"] == "10")
         #expect(
             query["totp"]
@@ -131,25 +133,25 @@ struct SpotifyTokenProviderTests {
     }
 
     @Test func aValidTokenIsReusedUntilItNearsExpiry() async throws {
-        let provider = provider()
+        let (provider, stub) = provider()
 
         #expect(try await provider.token() == "token-1")
         #expect(try await provider.token() == "token-1")
-        #expect(StubURLProtocol.recordedRequests.count == 3)
+        #expect(stub.requests.count == 3)
 
         // One second before the 60-second margin the token still counts as fresh.
         let lifetime = Self.expirationMs / 1000 - TimeInterval(Self.clientTime)
         clock.advance(by: lifetime - 61)
         #expect(try await provider.token() == "token-1")
-        #expect(StubURLProtocol.recordedRequests.count == 3)
+        #expect(stub.requests.count == 3)
 
         clock.advance(by: 1)
         #expect(try await provider.token() == "token-1")
-        #expect(StubURLProtocol.recordedRequests.count == 6)
+        #expect(stub.requests.count == 6)
     }
 
     @Test func anAnonymousTokenMeansTheCookieWasRejected() async throws {
-        let provider = provider(
+        let (provider, stub) = provider(
             Self.handler(token: { request in
                 request.value(forHTTPHeaderField: "Cookie") == "sp_dc=\(Self.cookie)"
                     ? (200, Self.tokenBody("anon-token", anonymous: true))
@@ -157,77 +159,79 @@ struct SpotifyTokenProviderTests {
             }))
 
         await #expect(throws: SpotifyAuthError.cookieRejected) { _ = try await provider.token() }
-        #expect(StubURLProtocol.recordedRequests.count == 3)
+        #expect(stub.requests.count == 3)
 
         // The same cookie is not worth asking about twice.
         await #expect(throws: SpotifyAuthError.cookieRejected) { _ = try await provider.token() }
-        #expect(StubURLProtocol.recordedRequests.count == 3)
+        #expect(stub.requests.count == 3)
 
         credentials.setCookie("a-fresh-cookie")
         #expect(try await provider.token() == "token-2")
-        #expect(StubURLProtocol.recordedRequests.count == 6)
+        #expect(stub.requests.count == 6)
     }
 
     @Test func invalidateForcesARefetch() async throws {
-        let provider = provider()
+        let (provider, stub) = provider()
 
         _ = try await provider.token()
         await provider.invalidate()
 
         #expect(try await provider.token() == "token-1")
-        #expect(StubURLProtocol.recordedRequests.count == 6)
+        #expect(stub.requests.count == 6)
     }
 
     @Test func invalidateKeepsTheRejection() async throws {
-        let provider = provider(
+        let (provider, stub) = provider(
             Self.handler(token: { _ in (200, Self.tokenBody("anon-token", anonymous: true)) }))
 
         await #expect(throws: SpotifyAuthError.cookieRejected) { _ = try await provider.token() }
         await provider.invalidate()
 
         await #expect(throws: SpotifyAuthError.cookieRejected) { _ = try await provider.token() }
-        #expect(StubURLProtocol.recordedRequests.count == 3)
+        #expect(stub.requests.count == 3)
     }
 
     @Test func secretsFailureStopsAtTheFirstHop() async throws {
-        let failing = provider(Self.handler(secrets: (500, Data("nope".utf8))))
+        let (failing, stub) = provider(Self.handler(secrets: (500, Data("nope".utf8))))
         await #expect(throws: SpotifyAuthError.unexpectedResponse(step: .secrets, status: 500)) {
             _ = try await failing.token()
         }
-        #expect(StubURLProtocol.recordedRequests.count == 1)
+        #expect(stub.requests.count == 1)
 
-        let broken = provider(Self.handler(secrets: (200, Data("{not json".utf8))))
+        let (broken, _) = provider(Self.handler(secrets: (200, Data("{not json".utf8))))
         await #expect(throws: SpotifyAuthError.unexpectedResponse(step: .secrets, status: nil)) {
             _ = try await broken.token()
         }
 
-        let empty = provider(Self.handler(secrets: (200, Data("{}".utf8))))
+        let (empty, _) = provider(Self.handler(secrets: (200, Data("{}".utf8))))
         await #expect(throws: SpotifyAuthError.unexpectedResponse(step: .secrets, status: nil)) {
             _ = try await empty.token()
         }
     }
 
     @Test func serverTimeFailureStopsAtTheSecondHop() async throws {
-        let failing = provider(Self.handler(serverTime: (503, Data("nope".utf8))))
+        let (failing, stub) = provider(Self.handler(serverTime: (503, Data("nope".utf8))))
         await #expect(throws: SpotifyAuthError.unexpectedResponse(step: .serverTime, status: 503)) {
             _ = try await failing.token()
         }
-        #expect(StubURLProtocol.recordedRequests.count == 2)
+        #expect(stub.requests.count == 2)
 
-        let broken = provider(Self.handler(serverTime: (200, Data(#"{"serverTime":"soon"}"#.utf8))))
+        let (broken, _) = provider(
+            Self.handler(serverTime: (200, Data(#"{"serverTime":"soon"}"#.utf8))))
         await #expect(throws: SpotifyAuthError.unexpectedResponse(step: .serverTime, status: nil)) {
             _ = try await broken.token()
         }
     }
 
     @Test func tokenFailureIsReportedAsSuch() async throws {
-        let failing = provider(Self.handler(token: { _ in (401, Data()) }))
+        let (failing, stub) = provider(Self.handler(token: { _ in (401, Data()) }))
         await #expect(throws: SpotifyAuthError.unexpectedResponse(step: .token, status: 401)) {
             _ = try await failing.token()
         }
-        #expect(StubURLProtocol.recordedRequests.count == 3)
+        #expect(stub.requests.count == 3)
 
-        let broken = provider(Self.handler(token: { _ in (200, Data(#"{"accessToken":1}"#.utf8)) }))
+        let (broken, _) = provider(
+            Self.handler(token: { _ in (200, Data(#"{"accessToken":1}"#.utf8)) }))
         await #expect(throws: SpotifyAuthError.unexpectedResponse(step: .token, status: nil)) {
             _ = try await broken.token()
         }
