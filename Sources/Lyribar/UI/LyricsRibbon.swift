@@ -55,6 +55,20 @@ struct LyricsRibbon: Equatable {
             position, from: (lines[low].time, origins[low]), to: (lines[low + 1].time, origins[low + 1]))
     }
 
+    /// Lines with text that intersect the viewport, with their x in viewport coordinates.
+    func visibleLines(offset: CGFloat, viewportWidth: CGFloat) -> [(index: Int, x: CGFloat)] {
+        let anchor = viewportWidth * Self.anchorShare
+        var visible: [(index: Int, x: CGFloat)] = []
+        for index in lines.indices where widths[index] > 0 {
+            let x = anchor + origins[index] - offset
+            if x >= viewportWidth { break }
+            if x + widths[index] > 0 {
+                visible.append((index, x))
+            }
+        }
+        return visible
+    }
+
     private static func interpolate(
         _ position: TimeInterval, from: (time: TimeInterval, x: CGFloat), to: (time: TimeInterval, x: CGFloat)
     ) -> CGFloat {
