@@ -26,6 +26,8 @@ final class LyricsRibbonView: NSView {
         }
     }
 
+    static let dimmedAlpha: CGFloat = 0.7
+
     private(set) var ribbon: LyricsRibbon?
     private var heights: [CGFloat] = []
     private var timer: Timer?
@@ -65,10 +67,11 @@ final class LyricsRibbonView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let ribbon else { return }
+        let dimmed = NSColor.labelColor.withAlphaComponent(Self.dimmedAlpha)
         for (index, x) in ribbon.visibleLines(offset: offset(at: Date()), viewportWidth: bounds.width) {
             let attributes: [NSAttributedString.Key: Any] = [
                 .font: MarqueeTextView.font,
-                .foregroundColor: index == currentIndex ? NSColor.labelColor : NSColor.secondaryLabelColor,
+                .foregroundColor: index == currentIndex ? NSColor.labelColor : dimmed,
             ]
             let origin = NSPoint(x: x, y: ((bounds.height - heights[index]) / 2).rounded())
             (ribbon.lines[index].text as NSString).draw(at: origin, withAttributes: attributes)

@@ -90,22 +90,22 @@ struct LyricsRibbonTests {
     @Test func visibleLinesAreTheOnesIntersectingTheViewport() {
         // Origins: 0, 124, 198 (empty), 222, 316.
         let ribbon = ribbon([(10, 100), (20, 50), (25, 0), (30, 70)])
-        // Anchor at 50: the first line starts there, the second one at 174, the last one at 272.
+        // Anchor at 100: the first line starts there, the second one at 224, the last one at 322.
         let atFirst = ribbon.visibleLines(offset: 0, viewportWidth: 200)
-        #expect(atFirst.map(\.index) == [0, 1])
-        #expect(atFirst.map(\.x) == [50, 174])
+        #expect(atFirst.map(\.index) == [0])
+        #expect(atFirst.map(\.x) == [100])
 
         // The first line has scrolled out to the left; the empty line is never listed.
         let atLast = ribbon.visibleLines(offset: 222, viewportWidth: 200)
         #expect(atLast.map(\.index) == [1, 3])
-        #expect(atLast.map(\.x) == [-48, 50])
+        #expect(atLast.map(\.x) == [2, 100])
     }
 
     @Test func linesTouchingTheViewportEdgesAreNotVisible() {
         let ribbon = ribbon([(10, 100), (20, 50)])
-        // The first line ends exactly at the left edge; the second one starts at 50 - 150 + 124 = 24.
-        #expect(ribbon.visibleLines(offset: 150, viewportWidth: 200).map(\.index) == [1])
-        // The second line starts exactly at the right edge: 50 + 124 - (-26) = 200.
-        #expect(ribbon.visibleLines(offset: -26, viewportWidth: 200).map(\.index) == [0])
+        // The first line ends exactly at the left edge; the second one starts at 100 - 200 + 124 = 24.
+        #expect(ribbon.visibleLines(offset: 200, viewportWidth: 200).map(\.index) == [1])
+        // The second line starts exactly at the right edge: 100 + 124 - 24 = 200.
+        #expect(ribbon.visibleLines(offset: 24, viewportWidth: 200).map(\.index) == [0])
     }
 }

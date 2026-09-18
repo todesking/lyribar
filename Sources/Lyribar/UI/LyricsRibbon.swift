@@ -6,7 +6,7 @@ import Foundation
 struct LyricsRibbon: Equatable {
     static let gap: CGFloat = 24
     /// The anchor sits at this share of the lyric area, measured from its left edge.
-    static let anchorShare: CGFloat = 0.25
+    static let anchorShare: CGFloat = 0.5
 
     let lines: [LyricLine]
     let widths: [CGFloat]
