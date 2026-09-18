@@ -28,4 +28,29 @@ struct SettingsViewTests {
         #expect(SettingsView.lyricsDisplayOptions.map(\.title) == ["Scrolling lyrics", "Current line only"])
         #expect(Set(SettingsView.lyricsDisplayOptions.map(\.mode)) == Set(LyricsDisplayMode.allCases))
     }
+
+    @Test func spotifySectionTexts() {
+        #expect(SettingsView.spotifyTitle == "Spotify lyrics (unofficial)")
+        #expect(SettingsView.spotifyCookiePrompt == "sp_dc cookie")
+        #expect(
+            SettingsView.spotifyFooter
+                == "Uses your Spotify web session to fetch the lyrics Spotify shows. Unofficial and may stop working. Falls back to LRCLIB."
+        )
+    }
+
+    @Test func saveNeedsSomethingThatNormalizesToACookie() {
+        #expect(!SettingsView.canSaveSpotifyCookie(""))
+        #expect(!SettingsView.canSaveSpotifyCookie("  \n"))
+        #expect(!SettingsView.canSaveSpotifyCookie("sp_dc=;"))
+        #expect(SettingsView.canSaveSpotifyCookie("abc"))
+        #expect(SettingsView.canSaveSpotifyCookie("sp_dc=abc; sp_key=x"))
+    }
+
+    @Test func onlyFailedChecksAreShownAsProblems() {
+        #expect(SettingsView.isSpotifyProblem(.rejected))
+        #expect(SettingsView.isSpotifyProblem(.unverified("boom")))
+        #expect(!SettingsView.isSpotifyProblem(.notConfigured))
+        #expect(!SettingsView.isSpotifyProblem(.checking))
+        #expect(!SettingsView.isSpotifyProblem(.connected))
+    }
 }

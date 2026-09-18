@@ -13,6 +13,11 @@ private struct NoopLaunchAtLoginService: LaunchAtLoginService {
     func unregister() throws {}
 }
 
+/// Never reaches Spotify: the settings view checks the stored cookie when it appears.
+private struct NoopTokenVerifier: SpotifyTokenVerifying {
+    func token() async throws -> String { "token" }
+}
+
 @MainActor
 private final class FakeApp: ActivatableApp {
     var isCurrentApp = false
@@ -55,6 +60,8 @@ struct SettingsWindowControllerTests {
         let controller = SettingsWindowController(
             settings: settings,
             launchAtLogin: LaunchAtLoginController(settings: settings, service: NoopLaunchAtLoginService()),
+            spotify: SpotifyAccountController(
+                credentials: InMemorySpotifyCredentialStore(), verifier: NoopTokenVerifier()),
             cache: cache,
             activation: activation)
         return (controller, { defaults.removePersistentDomain(forName: suite) })
