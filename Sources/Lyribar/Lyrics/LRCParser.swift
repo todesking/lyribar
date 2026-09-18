@@ -26,7 +26,10 @@ enum LRCParser {
             remainder = remainder[remainder.index(after: closeIndex)...]
         }
         guard !times.isEmpty else { return [] }
-        let text = String(remainder)
+        // Some sources (e.g. LRCLIB) put a space right after the timestamp;
+        // trim it so the displayed text isn't shifted. An instrumental gap
+        // (no text after the timestamp) still ends up as an empty string.
+        let text = String(remainder).trimmingCharacters(in: .whitespaces)
         return times.map { LyricLine(time: $0, text: text) }
     }
 

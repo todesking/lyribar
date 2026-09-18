@@ -23,8 +23,18 @@ struct LRCParserTests {
         #expect(result?.lines == [LyricLine(time: 12.0, text: "Hello")])
     }
 
+    @Test func leadingSpaceAfterTimestampIsTrimmed() {
+        let result = LRCParser.parse("[00:12.00] Hello")
+        #expect(result?.lines == [LyricLine(time: 12.0, text: "Hello")])
+    }
+
     @Test func emptyTextLineIsKeptForInstrumentalGaps() {
         let result = LRCParser.parse("[00:12.00]")
+        #expect(result?.lines == [LyricLine(time: 12.0, text: "")])
+    }
+
+    @Test func whitespaceOnlyTextLineIsKeptForInstrumentalGaps() {
+        let result = LRCParser.parse("[00:12.00]   ")
         #expect(result?.lines == [LyricLine(time: 12.0, text: "")])
     }
 
