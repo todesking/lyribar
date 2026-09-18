@@ -77,6 +77,54 @@ struct StatusItemControllerTests {
         #expect(barView.maxWidth == 200)
     }
 
+    // The whole point of the reserved lyric width: the menu bar must not move between lines.
+    @Test func widthStaysWhileTheLineChanges() {
+        let (controller, _, _, cleanup) = makeController()
+        defer { cleanup() }
+        let barView = LyricsBarView(frame: NSRect(x: 0, y: 0, width: 0, height: 22))
+        controller.barView = barView
+
+        let track = TrackInfo(id: "spotify:track:abc", title: "Song", artist: "Artist", duration: 200)
+        let syncedAt = Date(timeIntervalSince1970: 1_000)
+        let lyrics = SyncedLyrics(lines: [
+            LyricLine(time: 5, text: "short"),
+            LyricLine(time: 10, text: ""),
+            LyricLine(time: 20, text: String(repeating: "a much longer line of lyrics ", count: 10)),
+        ])
+        let state = PlaybackState(track: track, isPlaying: true, syncedPosition: 0, syncedAt: syncedAt)
+        let status = LyricsResolver.Status.found(lyrics, source: "lrclib")
+
+        var widths: [CGFloat] = []
+        var shown: [String?] = []
+        // Before the first line, then each line.
+        for offset in [0, 5, 10, 20] as [TimeInterval] {
+            controller.render(state: state, status: status, now: syncedAt.addingTimeInterval(offset))
+            widths.append(barView.preferredWidth)
+            shown.append(barView.content.lyric)
+        }
+
+        #expect(shown[0] == nil)
+        #expect(shown[1] == "short")
+        #expect(shown[2] == nil)
+        #expect(shown[3]?.isEmpty == false)
+        #expect(widths == [300, 300, 300, 300])
+    }
+
+    // A track without lyrics shrinks back to the icon and the track info.
+    @Test func widthShrinksWithoutLyrics() {
+        let (controller, _, _, cleanup) = makeController()
+        defer { cleanup() }
+        let barView = LyricsBarView(frame: NSRect(x: 0, y: 0, width: 0, height: 22))
+        controller.barView = barView
+
+        let track = TrackInfo(id: "spotify:track:abc", title: "Song", artist: "Artist", duration: 200)
+        let syncedAt = Date(timeIntervalSince1970: 1_000)
+        let state = PlaybackState(track: track, isPlaying: true, syncedPosition: 0, syncedAt: syncedAt)
+
+        controller.render(state: state, status: .notFound, now: syncedAt)
+        #expect(barView.preferredWidth < 300)
+    }
+
     // Without a track the content is empty either way, so the bar view starts out with stale
     // content: the refresh is what clears it.
     @Test func showTrackInfoChangeRefreshesTheBarView() {
