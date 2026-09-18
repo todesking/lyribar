@@ -2,6 +2,22 @@ import AppKit
 import Testing
 @testable import Lyribar
 
+/// Holds the deferred menu action so the tests do not depend on a main queue hop.
+@MainActor
+private final class ManualScheduler {
+    private var pending: [@MainActor () -> Void] = []
+
+    func enqueue(_ work: @escaping @MainActor () -> Void) {
+        pending.append(work)
+    }
+
+    func run() {
+        let work = pending
+        pending = []
+        for item in work { item() }
+    }
+}
+
 @MainActor
 struct StatusMenuTests {
     private struct StubError: Error {}
@@ -39,15 +55,21 @@ struct StatusMenuTests {
         #expect(StatusMenu.lyricsTitle(.found(lyrics, source: "other")) == "Lyrics from other")
     }
 
-    @Test func settingsItemInvokesHandler() {
-        let menu = StatusMenu()
+    // The handler activates the app, which does not stick while the menu is still tracking.
+    @Test func settingsItemInvokesHandlerAfterTheMenuCloses() {
+        let scheduler = ManualScheduler()
+        let menu = StatusMenu(schedule: { work in scheduler.enqueue(work) })
         var opened = 0
         menu.onOpenSettings = { opened += 1 }
+
         let item = menu.menu.item(withTitle: "Settings…")
         #expect(item?.isEnabled == true)
         if let item, let action = item.action {
             _ = (item.target as? NSObject)?.perform(action, with: item)
         }
+        #expect(opened == 0)
+        scheduler.run()
+
         #expect(opened == 1)
     }
 
