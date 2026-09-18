@@ -51,6 +51,87 @@ struct LyricsBarViewTests {
         #expect(view.layoutResult.lyric != nil)
     }
 
+    private let lyrics = SyncedLyrics(lines: [
+        LyricLine(time: 10, text: "first"),
+        LyricLine(time: 20, text: ""),
+        LyricLine(time: 30, text: "third"),
+    ])
+
+    private func lyricFrame(of view: LyricsBarView) throws -> NSRect {
+        let range = try #require(view.layoutResult.lyric)
+        return NSRect(x: range.lowerBound, y: 0, width: range.upperBound - range.lowerBound, height: 22)
+    }
+
+    @Test func ribbonTakesTheLyricAreaAndHidesTheMarquee() throws {
+        let view = LyricsBarView(frame: NSRect(x: 0, y: 0, width: 0, height: 22))
+        view.update(
+            content: BarContent(
+                ribbon: RibbonContent(lyrics: lyrics, currentIndex: 2), trackInfo: "Song – Artist",
+                reservesLyricWidth: true),
+            maxWidth: 300)
+        view.layoutSubtreeIfNeeded()
+
+        #expect(view.preferredWidth == 300)
+        #expect(view.ribbonView.frame == (try lyricFrame(of: view)))
+        #expect(!view.ribbonView.isHidden)
+        #expect(view.marquee.isHidden)
+        #expect(view.ribbonView.lyrics == lyrics)
+        #expect(view.ribbonView.currentIndex == 2)
+    }
+
+    @Test func marqueeTakesTheLyricAreaInTheCurrentLineMode() throws {
+        let view = LyricsBarView(frame: NSRect(x: 0, y: 0, width: 0, height: 22))
+        view.update(
+            content: BarContent(lyric: "la la", trackInfo: "Song – Artist", reservesLyricWidth: true),
+            maxWidth: 300)
+        view.layoutSubtreeIfNeeded()
+
+        #expect(view.marquee.frame == (try lyricFrame(of: view)))
+        #expect(!view.marquee.isHidden)
+        #expect(view.ribbonView.isHidden)
+        #expect(view.ribbonView.lyrics == nil)
+    }
+
+    // The lyric area is the same in both modes, so switching does not move anything else.
+    @Test func lyricAreaIsTheSameInBothModes() {
+        let view = LyricsBarView(frame: NSRect(x: 0, y: 0, width: 0, height: 22))
+        view.update(
+            content: BarContent(
+                ribbon: RibbonContent(lyrics: lyrics, currentIndex: 0), trackInfo: "Song – Artist",
+                reservesLyricWidth: true),
+            maxWidth: 300)
+        let scrolling = view.layoutResult
+
+        view.update(
+            content: BarContent(lyric: longText, trackInfo: "Song – Artist", reservesLyricWidth: true),
+            maxWidth: 300)
+        #expect(view.layoutResult == scrolling)
+    }
+
+    @Test func ribbonIsHiddenOnceTheLyricsAreGone() {
+        let view = LyricsBarView(frame: NSRect(x: 0, y: 0, width: 0, height: 22))
+        view.update(
+            content: BarContent(
+                ribbon: RibbonContent(lyrics: lyrics, currentIndex: 0), reservesLyricWidth: true),
+            maxWidth: 300)
+        view.layoutSubtreeIfNeeded()
+        view.update(content: BarContent(trackInfo: "Song – Artist"), maxWidth: 300)
+        view.layoutSubtreeIfNeeded()
+
+        #expect(view.ribbonView.isHidden)
+        #expect(view.ribbonView.lyrics == nil)
+        #expect(!view.ribbonView.wantsAnimation)
+    }
+
+    @Test func playbackReachesTheRibbonView() {
+        let view = LyricsBarView(frame: NSRect(x: 0, y: 0, width: 0, height: 22))
+        let track = TrackInfo(id: "spotify:track:abc", title: "Song", artist: "Artist", duration: 200)
+        let state = PlaybackState(
+            track: track, isPlaying: true, syncedPosition: 12, syncedAt: Date(timeIntervalSince1970: 1_000))
+        view.playback = state
+        #expect(view.ribbonView.playback == state)
+    }
+
     @Test func clicksFallThrough() {
         let view = LyricsBarView(frame: NSRect(x: 0, y: 0, width: 0, height: 22))
         view.update(content: BarContent(lyric: "la la", trackInfo: "Song – Artist"), maxWidth: 300)

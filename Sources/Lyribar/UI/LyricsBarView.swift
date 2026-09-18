@@ -1,11 +1,14 @@
 import AppKit
 
-/// [current line (marquee)] [Title – Artist] [icon]. Mouse events fall through to the status bar button.
+/// [lyrics (scrolling ribbon or current line marquee)] [Title – Artist] [icon]. Mouse events fall
+/// through to the status bar button.
 @MainActor
 final class LyricsBarView: NSView {
     static let iconWidth: CGFloat = 18
 
-    private let marquee = MarqueeTextView(frame: .zero)
+    // Internal so tests can check which one takes the lyric area.
+    let marquee = MarqueeTextView(frame: .zero)
+    let ribbonView = LyricsRibbonView(frame: .zero)
     private let trackLabel = NSTextField(labelWithString: "")
     private let iconView = NSImageView(frame: .zero)
 
@@ -16,6 +19,12 @@ final class LyricsBarView: NSView {
         maxWidth: CGFloat(Settings.defaultMaxWidth))
 
     var preferredWidth: CGFloat { layoutResult.totalWidth }
+
+    /// The ribbon view interpolates the position itself, so this is set on every tick.
+    var playback: PlaybackState {
+        get { ribbonView.playback }
+        set { ribbonView.playback = newValue }
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -32,6 +41,7 @@ final class LyricsBarView: NSView {
         iconView.imageScaling = .scaleProportionallyDown
 
         addSubview(marquee)
+        addSubview(ribbonView)
         addSubview(trackLabel)
         addSubview(iconView)
         update(content: content, maxWidth: maxWidth)
@@ -49,9 +59,12 @@ final class LyricsBarView: NSView {
         self.maxWidth = maxWidth
 
         marquee.text = content.lyric ?? ""
+        ribbonView.lyrics = content.ribbon?.lyrics
+        ribbonView.currentIndex = content.ribbon?.currentIndex
         trackLabel.stringValue = content.trackInfo ?? ""
         layoutResult = BarLayout.compute(
-            lyricWidth: content.lyric.map(MarqueeTextView.width(of:)),
+            // The ribbon has no width of its own; its room comes from `reservesLyricWidth`.
+            lyricWidth: content.ribbon == nil ? content.lyric.map(MarqueeTextView.width(of:)) : nil,
             // NSTextField draws its text inset from the frame.
             trackInfoWidth: content.trackInfo.map { _ in ceil(trackLabel.intrinsicContentSize.width) },
             iconWidth: Self.iconWidth,
@@ -66,9 +79,13 @@ final class LyricsBarView: NSView {
         super.layout()
         let height = bounds.height
 
-        marquee.isHidden = layoutResult.lyric == nil
+        let showsRibbon = content.ribbon != nil
+        marquee.isHidden = layoutResult.lyric == nil || showsRibbon
+        ribbonView.isHidden = layoutResult.lyric == nil || !showsRibbon
         if let range = layoutResult.lyric {
-            marquee.frame = NSRect(x: range.lowerBound, y: 0, width: range.upperBound - range.lowerBound, height: height)
+            let frame = NSRect(x: range.lowerBound, y: 0, width: range.upperBound - range.lowerBound, height: height)
+            marquee.frame = frame
+            ribbonView.frame = frame
         }
 
         trackLabel.isHidden = layoutResult.trackInfo == nil
