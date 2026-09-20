@@ -5,6 +5,8 @@ the project uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+## 0.2.0 - 2026-09-21
+
 ### Changed
 
 - With only the current line shown, a line that does not fit now scrolls along
