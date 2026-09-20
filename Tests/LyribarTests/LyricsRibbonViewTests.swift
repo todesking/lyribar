@@ -156,6 +156,85 @@ struct LyricsRibbonViewTests {
         #expect(view.ribbonLayer.animation(forKey: LyricsRibbonView.scrollAnimationKey) == nil)
     }
 
+    // While resting nothing else refreshes the snapshots AppKit shows when switching Spaces.
+    @Test func stoppingRefreshesTheSnapshots() {
+        let view = LyricsRibbonView(frame: NSRect(x: 0, y: 0, width: 200, height: 22))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 200, height: 22), styleMask: [.borderless],
+            backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        window.contentView?.addSubview(view)
+        view.lyrics = lyrics
+        view.playback = state(playing: true, position: 5)
+
+        var refreshes = view.snapshotRefreshes
+        view.playback = state(playing: true, position: 6)
+        #expect(view.snapshotRefreshes == refreshes)
+
+        view.playback = state(playing: false, position: 7)
+        #expect(view.snapshotRefreshes == refreshes + 1)
+
+        view.playback = state(playing: false, position: 25)
+        #expect(view.snapshotRefreshes == refreshes + 2)
+
+        refreshes = view.snapshotRefreshes
+        view.playback = PlaybackState(
+            track: track, isPlaying: false, syncedPosition: 25, syncedAt: syncedAt.addingTimeInterval(1))
+        #expect(view.snapshotRefreshes == refreshes)
+    }
+
+    // The snapshot shown during the switch aims half an interval ahead of its refresh.
+    @Test func spaceChangeGlidesFromTheSnapshotPosition() throws {
+        let view = LyricsRibbonView(frame: NSRect(x: 0, y: 0, width: 200, height: 22))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 200, height: 22), styleMask: [.borderless],
+            backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        window.contentView?.addSubview(view)
+        view.lyrics = lyrics
+        let now = Date()
+        view.playback = PlaybackState(track: track, isPlaying: true, syncedPosition: 12, syncedAt: now)
+        let snapshotX = view.ribbonLayer.position.x
+
+        view.activeSpaceDidChange(now: now.addingTimeInterval(0.8))
+        let freeze = try #require(
+            view.ribbonLayer.animation(forKey: LyricsRibbonView.freezeAnimationKey) as? CABasicAnimation)
+        #expect(freeze.fromValue as? CGFloat == snapshotX)
+        #expect(freeze.toValue as? CGFloat == snapshotX)
+        #expect(abs(freeze.duration - LyricsRibbonView.spaceFreezeDuration) < 0.001)
+
+        // The glide starts after the freeze, from the snapshot to the position at that time.
+        let settle = try #require(
+            view.ribbonLayer.animation(forKey: LyricsRibbonView.settleAnimationKey) as? CABasicAnimation)
+        view.updatePosition(now: now.addingTimeInterval(0.8 + LyricsRibbonView.spaceFreezeDuration))
+        let delta = try #require(settle.fromValue as? CGFloat)
+        #expect(abs(delta - (snapshotX - view.ribbonLayer.position.x)) < 0.01)
+        #expect(delta > 0)
+        #expect(settle.duration == LyricsRibbonView.spaceSettleDuration)
+        #expect(abs(settle.beginTime - (freeze.beginTime + freeze.duration)) < 0.001)
+
+        view.playback = PlaybackState(track: track, isPlaying: false, syncedPosition: 13, syncedAt: now)
+        view.ribbonLayer.removeAllAnimations()
+        view.activeSpaceDidChange(now: now.addingTimeInterval(2))
+        #expect(view.ribbonLayer.animation(forKey: LyricsRibbonView.settleAnimationKey) == nil)
+    }
+
+    @Test func smallCorrectionsGlideAndSeeksJump() throws {
+        let view = LyricsRibbonView(frame: NSRect(x: 0, y: 0, width: 200, height: 22))
+
+        let animation = try #require(view.settleAnimation(from: -8))
+        #expect(animation.keyPath == "position.x")
+        #expect(animation.isAdditive)
+        #expect(animation.fromValue as? CGFloat == -8)
+        #expect(animation.toValue as? CGFloat == 0)
+        #expect(animation.duration == LyricsRibbonView.settleDuration)
+
+        #expect(view.settleAnimation(from: 0) == nil)
+        #expect(view.settleAnimation(from: LyricsRibbonView.maxSettleDistance + 1) == nil)
+        #expect(view.settleAnimation(from: -LyricsRibbonView.maxSettleDistance - 1) == nil)
+        #expect(view.settleAnimation(from: 500, limit: .infinity) != nil)
+    }
+
     @Test func clicksFallThrough() {
         let view = LyricsRibbonView(frame: NSRect(x: 0, y: 0, width: 200, height: 22))
         #expect(view.hitTest(NSPoint(x: 10, y: 10)) == nil)

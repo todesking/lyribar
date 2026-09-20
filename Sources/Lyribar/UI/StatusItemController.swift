@@ -27,7 +27,8 @@ final class StatusItemController {
     private var statusItem: NSStatusItem?
     private var timer: Timer?
     private var lastSnapshot: Snapshot?
-    private var settingsObservation: ObservationLoop?
+    private var changeObservation: ObservationLoop?
+    private var spaceObserver: NSObjectProtocol?
 
     init(
         monitor: PlaybackMonitor,
@@ -38,14 +39,16 @@ final class StatusItemController {
         self.monitor = monitor
         self.resolver = resolver
         self.settings = settings
-        observeSettings(schedule: schedule)
+        observeChanges(schedule: schedule)
     }
 
-    /// The tick already reads the settings, so this only removes the delay of up to one tick.
-    private func observeSettings(schedule: @escaping ObservationLoop.Schedule) {
-        settingsObservation = ObservationLoop(
+    /// The tick already reads all of these, so this only removes the delay of up to one tick. For the
+    /// playback state that delay is visible: the ribbon keeps scrolling until a pause is rendered.
+    private func observeChanges(schedule: @escaping ObservationLoop.Schedule) {
+        changeObservation = ObservationLoop(
             read: { [weak self] in
                 guard let self else { return }
+                _ = monitor.state
                 _ = settings.maxWidth
                 _ = settings.showTrackInfo
                 _ = settings.lyricsDisplayMode
@@ -68,6 +71,14 @@ final class StatusItemController {
             barView.autoresizingMask = [.height]
             button.addSubview(barView)
             self.barView = barView
+        }
+
+        spaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.barView?.ribbonView.activeSpaceDidChange()
+            }
         }
 
         let timer = Timer(timeInterval: Self.tickInterval, repeats: true) { [weak self] timer in

@@ -35,12 +35,28 @@ final class LyricsRibbonView: NSView {
     /// Every refresh blocks the main thread for some 10 ms, and the snapshots are rarely visible.
     static let snapshotInterval: TimeInterval = 1
     static let scrollAnimationKey = "scroll"
+    static let settleAnimationKey = "settle"
+    static let freezeAnimationKey = "freeze"
+    static let settleDuration: TimeInterval = 0.25
+    /// Farther than that is a seek.
+    static let maxSettleDistance: CGFloat = 80
+    static let spaceSettleDuration: TimeInterval = 0.4
+    /// Found by eye on macOS 27: shorter and the glide is over before the live layers are back.
+    static let spaceFreezeDuration: TimeInterval = 0.5
+    /// A snapshot replaced while it is shown is one more jump.
+    static let snapshotHoldAfterSpaceChange: TimeInterval = 0.5
 
     private(set) var ribbon: LyricsRibbon?
     // Internal so tests can check the scrolling and the highlight.
     let ribbonLayer = CALayer()
     /// One per line; nil for interludes.
     private(set) var lineLayers: [CATextLayer?] = []
+    // Internal for tests: `needsDisplay` cannot be reset in a window that is never shown.
+    private(set) var snapshotRefreshes = 0
+    /// Where the snapshots show the ribbon.
+    private var snapshotX: CGFloat?
+    private var snapshotHoldUntil = Date.distantPast
+    private var spaceChange: (at: Date, x: CGFloat)?
     private var textColor: CGColor?
     private var timer: Timer?
 
@@ -73,7 +89,7 @@ final class LyricsRibbonView: NSView {
         if changed {
             layoutLines()
             updateScrolling()
-            needsDisplay = true
+            refreshSnapshots(now: Date())
         }
     }
 
@@ -99,12 +115,55 @@ final class LyricsRibbonView: NSView {
 
     private var anchorX: CGFloat { bounds.width * LyricsRibbon.anchorShare }
 
+    private func positionX(at now: Date) -> CGFloat {
+        BarTextLayer.pixelAligned(anchorX - offset(at: now), scale: BarTextLayer.scale(for: self))
+    }
+
     /// Moves the model position; while the animation runs, only the snapshots show it.
     func updatePosition(now: Date) {
         BarTextLayer.withoutActions {
-            ribbonLayer.position = CGPoint(
-                x: BarTextLayer.pixelAligned(anchorX - offset(at: now), scale: BarTextLayer.scale(for: self)),
-                y: 0)
+            ribbonLayer.position = CGPoint(x: positionX(at: now), y: 0)
+        }
+    }
+
+    /// AppKit shows a snapshot until a moment after the switch, so the ribbon comes back where the
+    /// snapshot had it and glides to where it belongs.
+    func activeSpaceDidChange(now: Date = Date()) {
+        guard isAnimating, let snapshotX else { return }
+        snapshotHoldUntil = now.addingTimeInterval(Self.spaceFreezeDuration + Self.snapshotHoldAfterSpaceChange)
+        spaceChange = (at: now, x: snapshotX)
+        addSpaceChangeAnimations(now: now)
+        let hold = snapshotHoldUntil
+        DispatchQueue.main.asyncAfter(deadline: .now() + hold.timeIntervalSince(now)) { [weak self] in
+            MainActor.assumeIsolated {
+                // Catches up on the refresh that was held, unless another switch holds it again.
+                guard let self, self.isAnimating, self.snapshotHoldUntil == hold else { return }
+                self.refreshSnapshots(now: Date())
+            }
+        }
+    }
+
+    /// The live layers come back an unknown moment after the notification, so the ribbon waits at the
+    /// snapshot position for about that long before it glides.
+    private func addSpaceChangeAnimations(now: Date) {
+        guard let spaceChange else { return }
+        let freeze = max(0, spaceChange.at.addingTimeInterval(Self.spaceFreezeDuration).timeIntervalSince(now))
+        let mediaTime = ribbonLayer.convertTime(CACurrentMediaTime(), from: nil)
+        ribbonLayer.removeAnimation(forKey: Self.freezeAnimationKey)
+        ribbonLayer.removeAnimation(forKey: Self.settleAnimationKey)
+        if freeze > 0 {
+            let animation = CABasicAnimation(keyPath: "position.x")
+            animation.fromValue = spaceChange.x
+            animation.toValue = spaceChange.x
+            animation.beginTime = mediaTime
+            animation.duration = freeze
+            ribbonLayer.add(animation, forKey: Self.freezeAnimationKey)
+        }
+        let delta = spaceChange.x - positionX(at: now.addingTimeInterval(freeze))
+        // Not a seek however far it is: the snapshot is older after a held refresh.
+        if let animation = settleAnimation(from: delta, duration: Self.spaceSettleDuration, limit: .infinity) {
+            animation.beginTime = mediaTime + freeze
+            ribbonLayer.add(animation, forKey: Self.settleAnimationKey)
         }
     }
 
@@ -152,7 +211,7 @@ final class LyricsRibbonView: NSView {
         updateHighlight()
         layoutLines()
         updateScrolling()
-        needsDisplay = true
+        refreshSnapshots(now: Date())
     }
 
     private func layoutLines() {
@@ -191,16 +250,60 @@ final class LyricsRibbonView: NSView {
     }
 
     /// Seeks, pauses and resyncs all arrive as a new `playback`, so the animation is simply rebuilt.
+    /// While it runs the model position is left to `refreshSnapshots`, so that it stays where the
+    /// snapshots show the ribbon.
     private func updateScrolling() {
         updateTimer()
         let now = Date()
+        let shownX = ribbonLayer.presentation()?.position.x
+        let wasScrolling = ribbonLayer.animation(forKey: Self.scrollAnimationKey) != nil
+        let oldPosition = ribbonLayer.position
         ribbonLayer.removeAnimation(forKey: Self.scrollAnimationKey)
-        updatePosition(now: now)
-        guard isAnimating else { return }
-        let mediaTime = ribbonLayer.convertTime(CACurrentMediaTime(), from: nil)
-        if let animation = scrollAnimation(now: now, mediaTime: mediaTime) {
-            ribbonLayer.add(animation, forKey: Self.scrollAnimationKey)
+        ribbonLayer.removeAnimation(forKey: Self.settleAnimationKey)
+        if isAnimating {
+            let mediaTime = ribbonLayer.convertTime(CACurrentMediaTime(), from: nil)
+            if let animation = scrollAnimation(now: now, mediaTime: mediaTime) {
+                ribbonLayer.add(animation, forKey: Self.scrollAnimationKey)
+            }
+            if !wasScrolling {
+                refreshSnapshots(now: now)
+            }
+        } else {
+            updatePosition(now: now)
+            // Nothing refreshes the snapshots while the ribbon rests.
+            if wasScrolling || ribbonLayer.position != oldPosition {
+                refreshSnapshots(now: now)
+            }
         }
+        if let spaceChange, now < spaceChange.at.addingTimeInterval(Self.spaceFreezeDuration) {
+            addSpaceChangeAnimations(now: now)
+        } else if let shownX, let animation = settleAnimation(from: shownX - positionX(at: now)) {
+            ribbonLayer.add(animation, forKey: Self.settleAnimationKey)
+        }
+    }
+
+    /// A pause arrives late, so the ribbon has scrolled past the position it reports; resyncs are a
+    /// little off too. Small corrections glide instead of jumping. Nil for seeks and for no correction.
+    func settleAnimation(
+        from delta: CGFloat, duration: TimeInterval = settleDuration, limit: CGFloat = maxSettleDistance
+    ) -> CABasicAnimation? {
+        guard delta != 0, abs(delta) <= limit else { return nil }
+        let animation = CABasicAnimation(keyPath: "position.x")
+        animation.isAdditive = true
+        animation.fromValue = delta
+        animation.toValue = 0
+        animation.duration = duration
+        animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        return animation
+    }
+
+    /// A snapshot is shown at some time during the interval it is valid for, so while scrolling it
+    /// aims at the middle: that halves how far off it can be.
+    private func refreshSnapshots(now: Date) {
+        updatePosition(now: isAnimating ? now.addingTimeInterval(Self.snapshotInterval / 2) : now)
+        snapshotX = ribbonLayer.position.x
+        snapshotRefreshes += 1
+        needsDisplay = true
     }
 
     private func updateTimer() {
@@ -208,8 +311,9 @@ final class LyricsRibbonView: NSView {
         if shouldRun, timer == nil {
             let timer = Timer(timeInterval: Self.snapshotInterval, repeats: true) { [weak self] timer in
                 let alive = MainActor.assumeIsolated {
-                    self?.updatePosition(now: Date())
-                    self?.needsDisplay = true
+                    if let self, Date() >= self.snapshotHoldUntil {
+                        self.refreshSnapshots(now: Date())
+                    }
                     return self != nil
                 }
                 if !alive {
