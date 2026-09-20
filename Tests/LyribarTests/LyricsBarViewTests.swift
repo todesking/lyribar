@@ -124,8 +124,25 @@ struct LyricsBarViewTests {
 
         #expect(view.marquee.frame == (try lyricFrame(of: view)))
         #expect(!view.marquee.isHidden)
+        #expect(view.marquee.line == line("la la"))
         #expect(view.ribbonView.isHidden)
         #expect(view.ribbonView.lyrics == nil)
+
+        view.update(content: BarContent(trackInfo: "Song – Artist", reservesLyricWidth: true), maxWidth: 300)
+        #expect(view.marquee.line == nil)
+    }
+
+    // Both lyric views scroll by the playback position.
+    @Test func playbackReachesBothLyricViews() {
+        let view = LyricsBarView(frame: NSRect(x: 0, y: 0, width: 0, height: 22))
+        let track = TrackInfo(id: "spotify:track:abc", title: "Song", artist: "Artist", duration: 200)
+        let playback = PlaybackState(
+            track: track, isPlaying: false, syncedPosition: 12, syncedAt: Date(timeIntervalSince1970: 1_000))
+        view.playback = playback
+
+        #expect(view.playback == playback)
+        #expect(view.ribbonView.playback == playback)
+        #expect(view.marquee.playback == playback)
     }
 
     // The lyric area is the same in both modes, so switching does not move anything else.

@@ -159,6 +159,7 @@ struct StatusItemControllerTests {
         controller.render(state: after, status: status, now: syncedAt)
 
         #expect(barView.playback == after)
+        #expect(barView.marquee.playback == after)
     }
 
     @Test func switchingTheDisplayModeRefreshesTheBarView() {

@@ -3,37 +3,52 @@ import Testing
 @testable import Lyribar
 
 struct MarqueeAnimationTests {
-    // 60pt overflow: 1s rest, 2s scroll, 1s rest.
-    private func offset(_ elapsed: Double) -> CGFloat {
-        MarqueeAnimation.offset(elapsed: elapsed, textWidth: 160, availableWidth: 100)
+    // 60pt overflow over a line from 10 s to 14 s.
+    private func offset(_ position: Double) -> CGFloat {
+        MarqueeAnimation.offset(position: position, start: 10, end: 14, textWidth: 160, availableWidth: 100)
     }
 
     @Test func staysStillWhenTextFits() {
-        #expect(MarqueeAnimation.offset(elapsed: 5, textWidth: 80, availableWidth: 100) == 0)
-        #expect(MarqueeAnimation.offset(elapsed: 5, textWidth: 100, availableWidth: 100) == 0)
+        for position in [5, 12, 20] as [Double] {
+            #expect(
+                MarqueeAnimation.offset(position: position, start: 10, end: 14, textWidth: 80, availableWidth: 100)
+                    == 0)
+            #expect(
+                MarqueeAnimation.offset(position: position, start: 10, end: 14, textWidth: 100, availableWidth: 100)
+                    == 0)
+        }
     }
 
-    @Test func restsAtTheStart() {
+    @Test func startsAtTheLeftEdge() {
         #expect(offset(0) == 0)
-        #expect(offset(0.9) == 0)
+        #expect(offset(9.9) == 0)
+        #expect(offset(10) == 0)
     }
 
-    @Test func scrollsAtThirtyPointsPerSecond() {
-        #expect(offset(1.5) == 15)
-        #expect(offset(2) == 30)
+    @Test func endsWithTheEndOfTheTextAtTheRightEdge() {
+        #expect(offset(14) == 60)
+        #expect(offset(15) == 60)
+        #expect(offset(1_000) == 60)
     }
 
-    @Test func restsAtTheEnd() {
-        #expect(offset(3) == 60)
-        #expect(offset(3.9) == 60)
+    @Test func scrollsAtASteadyPaceInBetween() {
+        #expect(offset(11) == 15)
+        #expect(offset(12) == 30)
+        #expect(offset(13) == 45)
     }
 
-    @Test func returnsToTheStartAndRepeats() {
-        #expect(offset(4.5) == 0)
-        #expect(offset(6) == 30)
+    @Test func staysStillWhenTheLineHasNoLength() {
+        for position in [5, 10, 12, 20] as [Double] {
+            #expect(
+                MarqueeAnimation.offset(position: position, start: 10, end: 10, textWidth: 160, availableWidth: 100)
+                    == 0)
+            #expect(
+                MarqueeAnimation.offset(position: position, start: 10, end: 4, textWidth: 160, availableWidth: 100)
+                    == 0)
+        }
     }
 
-    @Test func neverScrollsPastTheEnd() {
+    @Test func neverScrollsPastTheEnds() {
         for step in 0..<400 {
             let value = offset(Double(step) * 0.05)
             #expect(value >= 0 && value <= 60)
