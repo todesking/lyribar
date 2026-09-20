@@ -249,25 +249,62 @@ struct LyricsRibbonTests {
         #expect(ribbon.offset(at: 10, duration: 200) == 0)
     }
 
-    @Test func visibleLinesAreTheOnesIntersectingTheViewport() {
-        // Origins: 0, 124, 198 (empty), 222, 316.
-        let ribbon = ribbon([(10, 100), (20, 50), (25, 0), (30, 70)])
-        // Anchor at 100: the first line starts there, the second one at 224, the last one at 322.
-        let atFirst = ribbon.visibleLines(offset: 0, viewportWidth: 200)
-        #expect(atFirst.map(\.index) == [0])
-        #expect(atFirst.map(\.x) == [100])
-
-        // The first line has scrolled out to the left; the empty line is never listed.
-        let atLast = ribbon.visibleLines(offset: 222, viewportWidth: 200)
-        #expect(atLast.map(\.index) == [1, 3])
-        #expect(atLast.map(\.x) == [2, 100])
+    @Test func viewportIsTheStretchAroundTheOffset() {
+        let ribbon = ribbon([(10, 100), (20, 50)])
+        // The anchor sits in the middle, so the offset does too.
+        #expect(ribbon.viewport(offset: 222, width: 200) == 122...322)
+        #expect(ribbon.viewport(offset: 0, width: 200) == -100...100)
+        #expect(ribbon.viewport(offset: 50, width: 0) == 50...50)
     }
 
-    @Test func linesTouchingTheViewportEdgesAreNotVisible() {
-        let ribbon = ribbon([(10, 100), (20, 50)])
-        // The first line ends exactly at the left edge; the second one starts at 100 - 200 + 124 = 24.
-        #expect(ribbon.visibleLines(offset: 200, viewportWidth: 200).map(\.index) == [1])
-        // The second line starts exactly at the right edge: 100 + 124 - 24 = 200.
-        #expect(ribbon.visibleLines(offset: 24, viewportWidth: 200).map(\.index) == [0])
+    @Test func linesInAStretchAreTheOnesIntersectingIt() {
+        // Lines at 0..<100, 124..<174, an interlude at 198, 222..<292; the ribbon ends at 316.
+        let ribbon = ribbon([(10, 100), (20, 50), (25, 0), (30, 70)])
+        #expect(ribbon.lines(in: -100...100) == [0])
+        // The interlude is never listed, not even when the stretch holds nothing else.
+        #expect(ribbon.lines(in: 122...322) == [1, 3])
+        #expect(ribbon.lines(in: 180...210) == [])
+        #expect(ribbon.lines(in: -1_000...1_000) == [0, 1, 3])
+        // A stretch inside one line, down to a single point.
+        #expect(ribbon.lines(in: 130...140) == [1])
+        #expect(ribbon.lines(in: 130...130) == [1])
+    }
+
+    @Test func linesTouchingTheEndsOfAStretchAreNotInIt() {
+        let ribbon = ribbon([(10, 100), (20, 50), (25, 0), (30, 70)])
+        // The first line ends at 100 and the second one starts at 124.
+        #expect(ribbon.lines(in: 100...124) == [])
+        #expect(ribbon.lines(in: 99.5...124.5) == [0, 1])
+        #expect(ribbon.lines(in: 100...222) == [1])
+        #expect(ribbon.lines(in: 174...222.5) == [3])
+        // A point on the start of a line is not inside it.
+        #expect(ribbon.lines(in: 124...124) == [])
+    }
+
+    @Test func noLinesOutsideTheRibbonOrWithoutLyrics() {
+        let ribbon = ribbon([(10, 100), (20, 50), (25, 0), (30, 70)])
+        #expect(ribbon.lines(in: -500...0) == [])
+        #expect(ribbon.lines(in: -500...0.5) == [0])
+        #expect(ribbon.lines(in: 292...900) == [])
+        #expect(ribbon.lines(in: 291.5...900) == [3])
+
+        let empty = LyricsRibbon(lines: [], widths: [])
+        #expect(empty.lines(in: -1_000...1_000) == [])
+        let interludes = self.ribbon([(10, 0), (20, 0)])
+        #expect(interludes.lines(in: -1_000...1_000) == [])
+    }
+
+    // The bisection has to agree with looking at every line.
+    @Test func linesInAStretchMatchABruteForceScan() {
+        let ribbon = ribbon((0..<40).map { (TimeInterval($0), CGFloat([0, 35, 120, 60][$0 % 4])) })
+        for start in stride(from: CGFloat(-60), through: ribbon.origins[40] + 60, by: 17) {
+            for length in [CGFloat(0), 1, 50, 400] {
+                let expected = ribbon.lines.indices.filter {
+                    ribbon.widths[$0] > 0 && ribbon.origins[$0] < start + length
+                        && ribbon.origins[$0] + ribbon.widths[$0] > start
+                }
+                #expect(ribbon.lines(in: start...(start + length)) == expected)
+            }
+        }
     }
 }

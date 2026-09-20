@@ -48,18 +48,36 @@ struct LyricsRibbon: Equatable {
         return Curve(nodes: nodes)
     }
 
-    /// Lines with text that intersect the viewport, with their x in viewport coordinates.
-    func visibleLines(offset: CGFloat, viewportWidth: CGFloat) -> [(index: Int, x: CGFloat)] {
-        let anchor = viewportWidth * Self.anchorShare
-        var visible: [(index: Int, x: CGFloat)] = []
-        for index in lines.indices where widths[index] > 0 {
-            let x = anchor + origins[index] - offset
-            if x >= viewportWidth { break }
-            if x + widths[index] > 0 {
-                visible.append((index, x))
+    /// The stretch of ribbon x that a viewport of that width shows when scrolled to `offset`.
+    func viewport(offset: CGFloat, width: CGFloat) -> ClosedRange<CGFloat> {
+        let left = offset - width * Self.anchorShare
+        return left...(left + max(0, width))
+    }
+
+    /// The lines with text that intersect a stretch of ribbon x, in order. A line that only touches
+    /// an end of the stretch does not intersect it.
+    func lines(in stretch: ClosedRange<CGFloat>) -> [Int] {
+        // The line ends ascend like the origins, so the first line reaching into the stretch is
+        // found by bisection.
+        var low = 0
+        var high = lines.count
+        while low < high {
+            let mid = (low + high) / 2
+            if origins[mid] + widths[mid] > stretch.lowerBound {
+                high = mid
+            } else {
+                low = mid + 1
             }
         }
-        return visible
+        var found: [Int] = []
+        var index = low
+        while index < lines.count, origins[index] < stretch.upperBound {
+            if widths[index] > 0 {
+                found.append(index)
+            }
+            index += 1
+        }
+        return found
     }
 }
 
