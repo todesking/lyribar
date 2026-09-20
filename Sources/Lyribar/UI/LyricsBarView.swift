@@ -53,13 +53,13 @@ final class LyricsBarView: NSView {
         self.content = content
         self.maxWidth = maxWidth
 
-        marquee.text = content.lyric ?? ""
+        marquee.text = content.lyric?.text ?? ""
         ribbonView.lyrics = content.ribbon?.lyrics
         ribbonView.currentIndex = content.ribbon?.currentIndex
         trackInfoView.text = content.trackInfo ?? ""
         let newLayout = BarLayout.compute(
             // The ribbon has no width of its own; its room comes from `reservesLyricWidth`.
-            lyricWidth: content.ribbon == nil ? content.lyric.map(MarqueeTextView.width(of:)) : nil,
+            lyricWidth: content.ribbon == nil ? content.lyric.map { MarqueeTextView.width(of: $0.text) } : nil,
             trackInfoWidth: content.trackInfo.map(TrackInfoView.width(of:)),
             iconWidth: Self.iconWidth,
             maxWidth: maxWidth,

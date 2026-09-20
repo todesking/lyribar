@@ -5,9 +5,16 @@ struct RibbonContent: Equatable {
     var currentIndex: Int?
 }
 
+/// A line and the stretch of the track it is sung in: up to the next line, or to the end of the track.
+struct CurrentLineContent: Equatable {
+    var text: String
+    var start: TimeInterval
+    var end: TimeInterval
+}
+
 struct BarContent: Equatable {
     /// The current line, in the current line mode.
-    var lyric: String?
+    var lyric: CurrentLineContent?
     /// Every line, in the scrolling mode. At most one of `lyric` and `ribbon` is set.
     var ribbon: RibbonContent?
     var trackInfo: String?
@@ -46,9 +53,11 @@ func barContent(
             content.ribbon = RibbonContent(lyrics: lyrics, currentIndex: lineIndex)
         case .currentLine:
             if let lineIndex, lyrics.lines.indices.contains(lineIndex) {
-                let text = lyrics.lines[lineIndex].text
-                if !text.allSatisfy(\.isWhitespace) {
-                    content.lyric = text
+                let line = lyrics.lines[lineIndex]
+                if !line.text.allSatisfy(\.isWhitespace) {
+                    let next = lyrics.lines.index(after: lineIndex)
+                    let end = lyrics.lines.indices.contains(next) ? lyrics.lines[next].time : track.duration
+                    content.lyric = CurrentLineContent(text: line.text, start: line.time, end: end)
                 }
             }
         }

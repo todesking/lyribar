@@ -101,7 +101,7 @@ struct StatusItemControllerTests {
         for offset in [0, 5, 10, 20] as [TimeInterval] {
             controller.render(state: state, status: status, now: syncedAt.addingTimeInterval(offset))
             widths.append(barView.preferredWidth)
-            shown.append(barView.content.lyric)
+            shown.append(barView.content.lyric?.text)
         }
 
         #expect(shown[0] == nil)
@@ -165,7 +165,7 @@ struct StatusItemControllerTests {
         let (controller, settings, scheduler, cleanup) = makeController()
         defer { cleanup() }
         let barView = LyricsBarView(frame: NSRect(x: 0, y: 0, width: 0, height: 22))
-        barView.update(content: BarContent(lyric: "stale", trackInfo: "Song – Artist"), maxWidth: 999)
+        barView.update(content: BarContent(lyric: CurrentLineContent(text: "stale", start: 0, end: 1), trackInfo: "Song – Artist"), maxWidth: 999)
         controller.barView = barView
 
         settings.lyricsDisplayMode = .currentLine
@@ -196,7 +196,7 @@ struct StatusItemControllerTests {
         let (controller, settings, scheduler, cleanup) = makeController()
         defer { cleanup() }
         let barView = LyricsBarView(frame: NSRect(x: 0, y: 0, width: 0, height: 22))
-        barView.update(content: BarContent(lyric: "stale", trackInfo: "Song – Artist"), maxWidth: 999)
+        barView.update(content: BarContent(lyric: CurrentLineContent(text: "stale", start: 0, end: 1), trackInfo: "Song – Artist"), maxWidth: 999)
         controller.barView = barView
 
         settings.showTrackInfo = false
