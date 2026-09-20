@@ -15,6 +15,9 @@ enum BarTextLayer {
         layer.font = font
         layer.fontSize = font.pointSize
         layer.anchorPoint = .zero
+        // The text is redrawn when the transaction commits, outside of `withoutActions`; a fade
+        // there would show the old text at the new position.
+        layer.actions = ["contents": NSNull(), "string": NSNull()]
         return layer
     }
 

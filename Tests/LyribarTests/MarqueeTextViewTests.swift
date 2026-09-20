@@ -302,11 +302,9 @@ struct MarqueeTextViewTests {
 
         // Resyncs and seeks while scrolling leave the snapshots alone.
         requests = view.redrawRequests
-        let modelX = view.textLayer.position.x
         view.playback = state(playing: true, position: 13, at: now)
         view.playback = state(playing: true, position: 25, at: now)
         #expect(view.redrawRequests == requests)
-        #expect(view.textLayer.position.x == modelX)
 
         // Nothing else refreshes them once the text rests.
         view.playback = state(playing: false, position: 26, at: now)
@@ -318,6 +316,32 @@ struct MarqueeTextViewTests {
 
         view.playback = state(playing: true, position: 20, at: now)
         #expect(view.redrawRequests == requests + 2)
+    }
+
+    // A frame that misses the animation shows the model position.
+    @Test func modelPositionFollowsTheScrolling() {
+        let view = makeView()
+        let window = makeWindow(with: view)
+        defer { window.close() }
+        let now = Date()
+        view.playback = state(playing: true, position: 10, at: now)
+        view.line = longLine
+
+        view.playback = state(playing: true, position: 20, at: now)
+        #expect(scrollAnimation(of: view) != nil)
+        #expect(abs(view.textLayer.position.x - -distance / 2) < 5)
+
+        // A resync after the end of the line, before the next line arrives.
+        view.playback = state(playing: true, position: 30.05, at: now)
+        #expect(view.textLayer.position.x == aligned(-distance, in: view))
+    }
+
+    // A fade would show the text of the previous line at the start of the next one.
+    @Test func textChangesWithoutAFade() {
+        let layer = makeView().textLayer
+        #expect(layer.actions?["contents"] is NSNull)
+        #expect(layer.actions?["string"] is NSNull)
+        #expect(layer.action(forKey: "contents") == nil)
     }
 
     @Test func clicksFallThrough() {
