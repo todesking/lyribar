@@ -186,6 +186,10 @@ final class LyricsRibbonView: NSView {
         animation.values = curve.nodes.map { anchorX - $0.x }
         animation.keyTimes = curve.nodes.map { NSNumber(value: $0.time / total) }
         animation.calculationMode = .linear
+        // The values stay at the nodes; the timing functions give each segment its eased pace.
+        animation.timingFunctions = curve.slopes.map {
+            CAMediaTimingFunction(controlPoints: 1 / 3, Float($0.start) / 3, 2 / 3, 1 - Float($0.end) / 3)
+        }
         animation.duration = total
         animation.beginTime = mediaTime - playback.position(at: now)
         animation.fillMode = .both
