@@ -1,27 +1,26 @@
 import AppKit
 
-/// Scroll offset of an overflowing text as a function of time: rest at the start, scroll left until
-/// the end of the text is visible, rest there, then jump back to the start.
+/// Scroll offset of an overflowing line as a function of the playback position: the start of the
+/// text is at the left edge when the line starts, the end of it at the right edge when the line ends,
+/// at a steady pace in between.
 enum MarqueeAnimation {
-    static let speed: CGFloat = 30
-    static let pause: TimeInterval = 1
-
-    static func offset(elapsed: TimeInterval, textWidth: CGFloat, availableWidth: CGFloat) -> CGFloat {
+    static func offset(
+        position: TimeInterval, start: TimeInterval, end: TimeInterval, textWidth: CGFloat, availableWidth: CGFloat
+    ) -> CGFloat {
         let distance = textWidth - availableWidth
-        guard distance > 0, elapsed > 0 else { return 0 }
-        let scrollDuration = TimeInterval(distance / speed)
-        let cycle = pause + scrollDuration + pause
-        let t = elapsed.truncatingRemainder(dividingBy: cycle)
-        if t <= pause { return 0 }
-        if t >= pause + scrollDuration { return distance }
-        return CGFloat(t - pause) * speed
+        guard distance > 0, end > start else { return 0 }
+        let progress = min(max((position - start) / (end - start), 0), 1)
+        return distance * CGFloat(progress)
     }
 }
 
-/// The text is a layer and scrolling only moves it, see `BarTextLayer`.
+/// The text is a layer and scrolling only moves it, see `BarTextLayer`. While playing, one animation
+/// over the stretch of the line scrolls that layer, so the scrolling does not depend on the main
+/// thread.
 @MainActor
 final class MarqueeTextView: NSView {
-    static let frameInterval: TimeInterval = 1.0 / 30.0
+    static let scrollAnimationKey = "scroll"
+    static let settleAnimationKey = "settle"
 
     static var font: NSFont { NSFont.menuBarFont(ofSize: 0) }
 
@@ -29,22 +28,37 @@ final class MarqueeTextView: NSView {
         ceil(NSAttributedString(string: text, attributes: [.font: font]).size().width)
     }
 
-    var text: String = "" {
+    var line: CurrentLineContent? {
         didSet {
-            guard text != oldValue else { return }
-            textSize = NSAttributedString(string: text, attributes: [.font: Self.font]).size()
-            BarTextLayer.withoutActions {
-                BarTextLayer.setText(text, size: textSize, on: textLayer)
+            guard line != oldValue else { return }
+            if text != oldValue?.text ?? "" {
+                textSize = NSAttributedString(string: text, attributes: [.font: Self.font]).size()
+                BarTextLayer.withoutActions {
+                    BarTextLayer.setText(text, size: textSize, on: textLayer)
+                }
             }
-            restart()
+            updateColor()
+            // Going back to the start of the next line is a jump, however short the way is.
+            updateScrolling(redraws: true, glides: false)
+        }
+    }
+
+    var text: String { line?.text ?? "" }
+
+    var playback: PlaybackState = .empty() {
+        didSet {
+            guard playback != oldValue else { return }
+            updateScrolling()
         }
     }
 
     // Internal so tests can check the scrolling.
     let textLayer = BarTextLayer.make()
+    /// Where the text is on screen. Internal for tests: a layer that is never shown has no presentation.
+    var shownX: () -> CGFloat? = { nil }
+    // Internal for tests: `needsDisplay` cannot be reset in a window that is never shown.
+    private(set) var redrawRequests = 0
     private var textSize: CGSize = .zero
-    private var startedAt = Date()
-    private var timer: Timer?
     private var colorUpdatePending = false
 
     override init(frame frameRect: NSRect) {
@@ -55,6 +69,7 @@ final class MarqueeTextView: NSView {
         wantsLayer = true
         clipsToBounds = true
         host.addSublayer(textLayer)
+        shownX = { [textLayer] in textLayer.presentation()?.position.x }
     }
 
     @available(*, unavailable)
@@ -68,16 +83,14 @@ final class MarqueeTextView: NSView {
         let changed = newSize != frame.size
         super.setFrameSize(newSize)
         if changed {
-            updateTimer()
-            updatePosition(now: Date())
-            needsDisplay = true
+            updateScrolling(redraws: true)
         }
     }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         updateScale()
-        updateTimer()
+        updateScrolling()
     }
 
     override func viewDidChangeBackingProperties() {
@@ -93,22 +106,44 @@ final class MarqueeTextView: NSView {
             guard let self else { return }
             colorUpdatePending = false
             if updateColor() {
-                needsDisplay = true
+                requestRedraw()
             }
         }
     }
 
+    func offset(at now: Date) -> CGFloat {
+        guard let line else { return 0 }
+        return MarqueeAnimation.offset(
+            position: playback.position(at: now), start: line.start, end: line.end,
+            textWidth: ceil(textSize.width), availableWidth: bounds.width)
+    }
+
+    private func aligned(_ x: CGFloat) -> CGFloat {
+        BarTextLayer.pixelAligned(x, scale: BarTextLayer.scale(for: self))
+    }
+
+    /// Moves the model position; while the animation runs, only the snapshots show it.
     func updatePosition(now: Date) {
-        let offset = MarqueeAnimation.offset(
-            elapsed: now.timeIntervalSince(startedAt),
-            textWidth: ceil(textSize.width),
-            availableWidth: bounds.width
-        )
         BarTextLayer.withoutActions {
             textLayer.position = CGPoint(
-                x: BarTextLayer.pixelAligned(-offset, scale: BarTextLayer.scale(for: self)),
-                y: ((bounds.height - textLayer.bounds.height) / 2).rounded())
+                x: aligned(-offset(at: now)), y: ((bounds.height - textLayer.bounds.height) / 2).rounded())
         }
+    }
+
+    /// The scrolling of the whole line, to be started at `mediaTime` for the playback position at
+    /// `now`. Nil when the text rests: it fits, the line has no length, or the playback is paused.
+    func scrollAnimation(now: Date, mediaTime: CFTimeInterval) -> CABasicAnimation? {
+        guard let line, overflows, line.end > line.start, playback.isPlaying else { return nil }
+
+        let animation = CABasicAnimation(keyPath: "position.x")
+        animation.fromValue = CGFloat(0)
+        animation.toValue = aligned(bounds.width - ceil(textSize.width))
+        animation.duration = line.end - line.start
+        animation.beginTime = mediaTime - (playback.position(at: now) - line.start)
+        animation.timingFunction = CAMediaTimingFunction(name: .linear)
+        animation.fillMode = .both
+        animation.isRemovedOnCompletion = false
+        return animation
     }
 
     /// Whether the color changed.
@@ -128,37 +163,45 @@ final class MarqueeTextView: NSView {
         }
     }
 
+    /// An invalidation makes AppKit snapshot the status bar button some nine times.
+    private func requestRedraw() {
+        redrawRequests += 1
+        needsDisplay = true
+    }
+
     private var overflows: Bool {
         !text.isEmpty && ceil(textSize.width) > bounds.width
     }
 
-    private func restart() {
-        startedAt = Date()
-        updateColor()
-        updateTimer()
-        updatePosition(now: startedAt)
-        // Once per text, so that the snapshots AppKit keeps of the button do not go stale.
-        needsDisplay = true
-    }
+    /// Seeks, pauses and resyncs all arrive as a new `playback`, so the animation is simply rebuilt.
+    /// The snapshots AppKit keeps of the button show the model position. While the animation runs it
+    /// stays where the last redraw had it; while the text rests, nothing else would redraw them.
+    private func updateScrolling(redraws: Bool = false, glides: Bool = true) {
+        let now = Date()
+        let shownX = shownX()
+        let wasScrolling = textLayer.animation(forKey: Self.scrollAnimationKey) != nil
+        let oldPosition = textLayer.position
+        textLayer.removeAnimation(forKey: Self.scrollAnimationKey)
+        textLayer.removeAnimation(forKey: Self.settleAnimationKey)
 
-    private func updateTimer() {
-        let shouldRun = overflows && window != nil
-        if shouldRun, timer == nil {
-            let timer = Timer(timeInterval: Self.frameInterval, repeats: true) { [weak self] timer in
-                let alive = MainActor.assumeIsolated {
-                    self?.updatePosition(now: Date())
-                    return self != nil
-                }
-                if !alive {
-                    timer.invalidate()
-                }
+        var redraws = redraws
+        let mediaTime = textLayer.convertTime(CACurrentMediaTime(), from: nil)
+        if window != nil, let animation = scrollAnimation(now: now, mediaTime: mediaTime) {
+            textLayer.add(animation, forKey: Self.scrollAnimationKey)
+            if redraws {
+                updatePosition(now: now)
             }
-            // .common keeps the marquee moving while the menu is open.
-            RunLoop.main.add(timer, forMode: .common)
-            self.timer = timer
-        } else if !shouldRun {
-            timer?.invalidate()
-            timer = nil
+        } else {
+            updatePosition(now: now)
+            redraws = redraws || wasScrolling || textLayer.position != oldPosition
+        }
+        if redraws {
+            requestRedraw()
+        }
+        if glides, let shownX,
+            let animation = BarTextLayer.settleAnimation(from: shownX - aligned(-offset(at: now)))
+        {
+            textLayer.add(animation, forKey: Self.settleAnimationKey)
         }
     }
 }

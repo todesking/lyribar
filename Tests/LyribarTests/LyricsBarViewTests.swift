@@ -6,6 +6,10 @@ import Testing
 struct LyricsBarViewTests {
     private let longText = String(repeating: "a very long line of lyrics ", count: 20)
 
+    private func line(_ text: String) -> CurrentLineContent {
+        CurrentLineContent(text: text, start: 10, end: 20)
+    }
+
     @Test func iconOnlyWithoutContent() {
         let view = LyricsBarView(frame: NSRect(x: 0, y: 0, width: 0, height: 22))
         #expect(view.preferredWidth == BarLayout.padding * 2 + LyricsBarView.iconWidth)
@@ -14,14 +18,14 @@ struct LyricsBarViewTests {
 
     @Test func widthIsCappedAtMaxWidth() {
         let view = LyricsBarView(frame: NSRect(x: 0, y: 0, width: 0, height: 22))
-        view.update(content: BarContent(lyric: longText, trackInfo: longText), maxWidth: 300)
+        view.update(content: BarContent(lyric: line(longText), trackInfo: longText), maxWidth: 300)
         #expect(view.preferredWidth == 300)
         #expect(view.frame.width == 300)
     }
 
     @Test func shrinksForShortContent() {
         let view = LyricsBarView(frame: NSRect(x: 0, y: 0, width: 0, height: 22))
-        view.update(content: BarContent(lyric: "la la", trackInfo: "Song – Artist"), maxWidth: 300)
+        view.update(content: BarContent(lyric: line("la la"), trackInfo: "Song – Artist"), maxWidth: 300)
         #expect(view.preferredWidth < 300)
         #expect(view.preferredWidth > BarLayout.padding * 2 + LyricsBarView.iconWidth)
     }
@@ -32,7 +36,7 @@ struct LyricsBarViewTests {
         var lyricWidths: [CGFloat?] = []
         for lyric in [nil, "la la", longText] as [String?] {
             view.update(
-                content: BarContent(lyric: lyric, trackInfo: "Song – Artist", reservesLyricWidth: true),
+                content: BarContent(lyric: lyric.map(line), trackInfo: "Song – Artist", reservesLyricWidth: true),
                 maxWidth: 300)
             widths.append(view.preferredWidth)
             lyricWidths.append(view.layoutResult.lyric.map { $0.upperBound - $0.lowerBound })
@@ -75,7 +79,7 @@ struct LyricsBarViewTests {
     // An NSTextField in a status bar button makes AppKit re-snapshot the button in a busy loop.
     @Test func containsNoTextField() {
         let view = LyricsBarView(frame: NSRect(x: 0, y: 0, width: 0, height: 22))
-        view.update(content: BarContent(lyric: "la la", trackInfo: "Song – Artist"), maxWidth: 300)
+        view.update(content: BarContent(lyric: line("la la"), trackInfo: "Song – Artist"), maxWidth: 300)
         var pending: [NSView] = [view]
         while let next = pending.popLast() {
             #expect(!(next is NSTextField))
@@ -114,14 +118,31 @@ struct LyricsBarViewTests {
     @Test func marqueeTakesTheLyricAreaInTheCurrentLineMode() throws {
         let view = LyricsBarView(frame: NSRect(x: 0, y: 0, width: 0, height: 22))
         view.update(
-            content: BarContent(lyric: "la la", trackInfo: "Song – Artist", reservesLyricWidth: true),
+            content: BarContent(lyric: line("la la"), trackInfo: "Song – Artist", reservesLyricWidth: true),
             maxWidth: 300)
         view.layoutSubtreeIfNeeded()
 
         #expect(view.marquee.frame == (try lyricFrame(of: view)))
         #expect(!view.marquee.isHidden)
+        #expect(view.marquee.line == line("la la"))
         #expect(view.ribbonView.isHidden)
         #expect(view.ribbonView.lyrics == nil)
+
+        view.update(content: BarContent(trackInfo: "Song – Artist", reservesLyricWidth: true), maxWidth: 300)
+        #expect(view.marquee.line == nil)
+    }
+
+    // Both lyric views scroll by the playback position.
+    @Test func playbackReachesBothLyricViews() {
+        let view = LyricsBarView(frame: NSRect(x: 0, y: 0, width: 0, height: 22))
+        let track = TrackInfo(id: "spotify:track:abc", title: "Song", artist: "Artist", duration: 200)
+        let playback = PlaybackState(
+            track: track, isPlaying: false, syncedPosition: 12, syncedAt: Date(timeIntervalSince1970: 1_000))
+        view.playback = playback
+
+        #expect(view.playback == playback)
+        #expect(view.ribbonView.playback == playback)
+        #expect(view.marquee.playback == playback)
     }
 
     // The lyric area is the same in both modes, so switching does not move anything else.
@@ -135,7 +156,7 @@ struct LyricsBarViewTests {
         let scrolling = view.layoutResult
 
         view.update(
-            content: BarContent(lyric: longText, trackInfo: "Song – Artist", reservesLyricWidth: true),
+            content: BarContent(lyric: line(longText), trackInfo: "Song – Artist", reservesLyricWidth: true),
             maxWidth: 300)
         #expect(view.layoutResult == scrolling)
     }
@@ -166,7 +187,7 @@ struct LyricsBarViewTests {
 
     @Test func clicksFallThrough() {
         let view = LyricsBarView(frame: NSRect(x: 0, y: 0, width: 0, height: 22))
-        view.update(content: BarContent(lyric: "la la", trackInfo: "Song – Artist"), maxWidth: 300)
+        view.update(content: BarContent(lyric: line("la la"), trackInfo: "Song – Artist"), maxWidth: 300)
         view.layoutSubtreeIfNeeded()
         #expect(view.hitTest(NSPoint(x: 10, y: 10)) == nil)
     }

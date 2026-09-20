@@ -5,6 +5,9 @@ import AppKit
 @MainActor
 enum BarTextLayer {
     static let dimmedAlpha: CGFloat = 0.7
+    static let settleDuration: TimeInterval = 0.25
+    /// Farther than that is a seek.
+    static let maxSettleDistance: CGFloat = 80
 
     static func make() -> CATextLayer {
         let layer = CATextLayer()
@@ -48,6 +51,21 @@ enum BarTextLayer {
 
     static func pixelAligned(_ value: CGFloat, scale: CGFloat) -> CGFloat {
         (value * scale).rounded() / scale
+    }
+
+    /// A pause arrives late, so the text has scrolled past the position it reports; resyncs are a
+    /// little off too. Small corrections glide instead of jumping. Nil for seeks and for no correction.
+    static func settleAnimation(
+        from delta: CGFloat, duration: TimeInterval = settleDuration, limit: CGFloat = maxSettleDistance
+    ) -> CABasicAnimation? {
+        guard delta != 0, abs(delta) <= limit else { return nil }
+        let animation = CABasicAnimation(keyPath: "position.x")
+        animation.isAdditive = true
+        animation.fromValue = delta
+        animation.toValue = 0
+        animation.duration = duration
+        animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        return animation
     }
 
     static func withoutActions(_ body: () -> Void) {

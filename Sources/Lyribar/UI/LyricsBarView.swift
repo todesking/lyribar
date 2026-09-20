@@ -20,10 +20,13 @@ final class LyricsBarView: NSView {
 
     var preferredWidth: CGFloat { layoutResult.totalWidth }
 
-    /// The ribbon view interpolates the position itself, so this is set on every tick.
+    /// The lyric views interpolate the position themselves, so this is set on every tick.
     var playback: PlaybackState {
         get { ribbonView.playback }
-        set { ribbonView.playback = newValue }
+        set {
+            ribbonView.playback = newValue
+            marquee.playback = newValue
+        }
     }
 
     override init(frame frameRect: NSRect) {
@@ -53,13 +56,13 @@ final class LyricsBarView: NSView {
         self.content = content
         self.maxWidth = maxWidth
 
-        marquee.text = content.lyric ?? ""
+        marquee.line = content.lyric
         ribbonView.lyrics = content.ribbon?.lyrics
         ribbonView.currentIndex = content.ribbon?.currentIndex
         trackInfoView.text = content.trackInfo ?? ""
         let newLayout = BarLayout.compute(
             // The ribbon has no width of its own; its room comes from `reservesLyricWidth`.
-            lyricWidth: content.ribbon == nil ? content.lyric.map(MarqueeTextView.width(of:)) : nil,
+            lyricWidth: content.ribbon == nil ? content.lyric.map { MarqueeTextView.width(of: $0.text) } : nil,
             trackInfoWidth: content.trackInfo.map(TrackInfoView.width(of:)),
             iconWidth: Self.iconWidth,
             maxWidth: maxWidth,

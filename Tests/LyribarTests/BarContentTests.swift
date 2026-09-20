@@ -33,14 +33,41 @@ struct BarContentTests {
 
     private var found: LyricsResolver.Status { .found(lyrics, source: "lrclib") }
 
+    private let first = CurrentLineContent(text: "first", start: 10, end: 20)
+    private let third = CurrentLineContent(text: "third", start: 30, end: 200)
+
     @Test func showsCurrentLineAndTrackInfoWhilePlaying() {
         let content = barContent(state: state(), status: found, lineIndex: 0, settings: makeSettings())
-        #expect(content == BarContent(lyric: "first", trackInfo: "Song – Artist", reservesLyricWidth: true))
+        #expect(content == BarContent(lyric: first, trackInfo: "Song – Artist", reservesLyricWidth: true))
     }
 
     @Test func keepsCurrentLineWhilePaused() {
         let content = barContent(state: state(playing: false), status: found, lineIndex: 2, settings: makeSettings())
-        #expect(content == BarContent(lyric: "third", trackInfo: "Song – Artist", reservesLyricWidth: true))
+        #expect(content == BarContent(lyric: third, trackInfo: "Song – Artist", reservesLyricWidth: true))
+    }
+
+    // An interlude ends the line like any other line does.
+    @Test func lineEndsWhereTheNextLineStarts() {
+        let content = barContent(state: state(), status: found, lineIndex: 0, settings: makeSettings())
+        #expect(content.lyric?.start == 10)
+        #expect(content.lyric?.end == 20)
+    }
+
+    @Test func lastLineEndsWithTheTrack() {
+        let content = barContent(state: state(), status: found, lineIndex: 2, settings: makeSettings())
+        #expect(content.lyric?.start == 30)
+        #expect(content.lyric?.end == track.duration)
+    }
+
+    // The marquee follows the stretch, so a repeated line is new content.
+    @Test func sameTextInAnotherStretchIsDifferentContent() {
+        let repeated = SyncedLyrics(lines: [LyricLine(time: 10, text: "la"), LyricLine(time: 20, text: "la")])
+        let contents = [0, 1].map {
+            barContent(
+                state: state(), status: .found(repeated, source: "lrclib"), lineIndex: $0, settings: makeSettings())
+        }
+        #expect(contents[0].lyric?.text == contents[1].lyric?.text)
+        #expect(contents[0] != contents[1])
     }
 
     @Test func hidesLyricForEmptyLine() {
@@ -109,7 +136,7 @@ struct BarContentTests {
     @Test func currentLineModeHasNoRibbon() {
         let content = barContent(
             state: state(), status: found, lineIndex: 0, settings: makeSettings(mode: .currentLine))
-        #expect(content.lyric == "first")
+        #expect(content.lyric == first)
         #expect(content.ribbon == nil)
     }
 
@@ -138,7 +165,7 @@ struct BarContentTests {
     @Test func hidesTrackInfoWhenDisabled() {
         let content = barContent(
             state: state(), status: found, lineIndex: 0, settings: makeSettings(showTrackInfo: false))
-        #expect(content == BarContent(lyric: "first", trackInfo: nil, reservesLyricWidth: true))
+        #expect(content == BarContent(lyric: first, trackInfo: nil, reservesLyricWidth: true))
     }
 
     @Test func trackInfoOmitsSeparatorWithoutArtist() {
