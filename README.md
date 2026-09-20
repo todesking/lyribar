@@ -96,9 +96,11 @@ To turn it on, give Lyribar the `sp_dc` cookie of your Spotify web session:
 4. Paste it into **Settings… > Spotify lyrics (unofficial)** and click **Save**.
 
 The section shows **Connected** once Spotify has accepted the cookie, and lyrics
-that are not cached yet come from Spotify first, then from LRCLIB. Lyrics cached
-earlier stay as they are until **Clear lyrics cache** is used. **Remove** deletes
-the cookie and turns the feature off again.
+that are not cached yet come from Spotify first, then from LRCLIB. The track
+playing at that moment is fetched again right away, so it switches over without
+waiting for the next one; lyrics cached for other tracks stay as they are until
+**Clear lyrics cache** is used. **Remove** deletes the cookie and turns the
+feature off again.
 
 Before using it, know what it is:
 
