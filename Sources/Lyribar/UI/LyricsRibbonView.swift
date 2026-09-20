@@ -179,13 +179,17 @@ final class LyricsRibbonView: NSView {
     /// `now`. Nil when there is nothing to scroll.
     func scrollAnimation(now: Date, mediaTime: CFTimeInterval) -> CAKeyframeAnimation? {
         guard let ribbon else { return nil }
-        let keyframes = ribbon.keyframes(duration: playback.track?.duration ?? 0)
-        guard keyframes.count >= 2, let total = keyframes.last?.time, total > 0 else { return nil }
+        let curve = ribbon.curve(duration: playback.track?.duration ?? 0)
+        guard curve.nodes.count >= 2, let total = curve.nodes.last?.time, total > 0 else { return nil }
 
         let animation = CAKeyframeAnimation(keyPath: "position.x")
-        animation.values = keyframes.map { anchorX - $0.x }
-        animation.keyTimes = keyframes.map { NSNumber(value: $0.time / total) }
+        animation.values = curve.nodes.map { anchorX - $0.x }
+        animation.keyTimes = curve.nodes.map { NSNumber(value: $0.time / total) }
         animation.calculationMode = .linear
+        // The values stay at the nodes; the timing functions give each segment its eased pace.
+        animation.timingFunctions = curve.slopes.map {
+            CAMediaTimingFunction(controlPoints: 1 / 3, Float($0.start) / 3, 2 / 3, 1 - Float($0.end) / 3)
+        }
         animation.duration = total
         animation.beginTime = mediaTime - playback.position(at: now)
         animation.fillMode = .both

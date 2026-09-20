@@ -39,7 +39,9 @@ track and artist, then the Lyribar icon. The lyrics are laid out on one long
 ribbon that scrolls with the playback position: the line being sung starts in
 the middle of the lyric area at the moment it begins, the lines before
 and after it are visible around it, and only the current line is drawn in the
-full text color. Seeing the neighbouring lines makes it easy to find your place
+full text color. A long line scrolls faster than a short one, but the ribbon
+eases from one pace into the next instead of changing speed where two lines
+meet. Seeing the neighbouring lines makes it easy to find your place
 even when the timings of the lyrics are a little off. An instrumental passage
 shows up as a gap, and a paused track keeps the ribbon where it is.
 

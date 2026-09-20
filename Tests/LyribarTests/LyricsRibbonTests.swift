@@ -6,6 +6,11 @@ import Testing
 
 struct LyricsRibbonTests {
     private let gap = LyricsRibbon.gap
+    /// Uneven lines, an interlude that only advances by the gap, and two lines sharing a time.
+    private let uneven: [(time: TimeInterval, width: CGFloat)] = [
+        (3, 40), (7.5, 220), (9, 0), (26, 90), (26, 130), (31.25, 60),
+    ]
+    private let unevenDuration: TimeInterval = 48
 
     private func ribbon(_ entries: [(time: TimeInterval, width: CGFloat)]) -> LyricsRibbon {
         LyricsRibbon(
@@ -24,16 +29,35 @@ struct LyricsRibbonTests {
     }
 
     @Test func lineStartsAtTheAnchorAtItsTime() {
-        let ribbon = ribbon([(10, 100), (20, 0), (30, 70)])
-        for (index, line) in ribbon.lines.enumerated() {
-            #expect(ribbon.offset(at: line.time, duration: 200) == ribbon.origins[index])
+        let cases: [([(time: TimeInterval, width: CGFloat)], TimeInterval)] = [
+            ([(10, 100), (20, 0), (30, 70)], 200), (uneven, unevenDuration),
+        ]
+        for (entries, duration) in cases {
+            let ribbon = ribbon(entries)
+            for (index, line) in ribbon.lines.enumerated() {
+                // Of lines sharing a time, only the later one is at the anchor at that time.
+                guard index == ribbon.lines.count - 1 || ribbon.lines[index + 1].time != line.time else { continue }
+                #expect(ribbon.offset(at: line.time, duration: duration) == ribbon.origins[index])
+            }
         }
     }
 
-    @Test func interpolatesBetweenLines() {
-        let ribbon = ribbon([(10, 100), (20, 50), (30, 70)])
-        #expect(ribbon.offset(at: 15, duration: 200) == (ribbon.origins[0] + ribbon.origins[1]) / 2)
-        #expect(ribbon.offset(at: 25, duration: 200) == (ribbon.origins[1] + ribbon.origins[2]) / 2)
+    // The ribbon starts and ends a line at the speed it passes the line boundary with, so it leaves
+    // the first node and reaches the last one at a standstill.
+    @Test func easesOutOfTheFirstLineAndIntoTheLastOne() {
+        // Nodes (0, 0), (10, 100), (20, 200): both segments run at 100 pt / 10 s, so the boundary
+        // speed is the same 10 pt/s and the halfway points are 12.5 pt off the straight line.
+        let even = ribbon([(0, 100 - gap), (10, 100 - gap)])
+        #expect(even.origins == [0, 100, 200])
+        #expect(even.offset(at: 5, duration: 20) == 37.5)
+        #expect(even.offset(at: 15, duration: 20) == 162.5)
+
+        // Nodes (0, 0), (10, 100), (20, 400): 10 pt/s meets 30 pt/s, so the boundary speed is the
+        // harmonic mean 15 pt/s and the slow segment gets the larger share of the easing.
+        let faster = ribbon([(0, 100 - gap), (10, 300 - gap)])
+        #expect(faster.origins == [0, 100, 400])
+        #expect(faster.offset(at: 5, duration: 20) == 31.25)
+        #expect(faster.offset(at: 15, duration: 20) == 268.75)
     }
 
     @Test func linesSharingATimeJumpToTheLaterOne() {
@@ -45,7 +69,10 @@ struct LyricsRibbonTests {
         let before = ribbon.offset(at: 19.999, duration: 200)
         #expect(before.isFinite)
         #expect(before < ribbon.origins[1])
-        #expect(ribbon.offset(at: 25, duration: 200) == (ribbon.origins[2] + ribbon.origins[3]) / 2)
+
+        let after = ribbon.offset(at: 25, duration: 200)
+        #expect(after > ribbon.origins[2])
+        #expect(after < ribbon.origins[3])
     }
 
     @Test func everyLineSharingOneTimeStaysFinite() {
@@ -57,20 +84,27 @@ struct LyricsRibbonTests {
     @Test func leadsInFromOneGapBeforeTheFirstLine() {
         let ribbon = ribbon([(10, 100), (20, 50)])
         #expect(ribbon.offset(at: 0, duration: 200) == -gap)
-        #expect(ribbon.offset(at: 5, duration: 200) == -gap / 2)
         #expect(ribbon.offset(at: -3, duration: 200) == -gap)
+        // Starting from a standstill, the lead-in is behind the straight line at its halfway point.
+        let halfway = ribbon.offset(at: 5, duration: 200)
+        #expect(halfway > -gap)
+        #expect(halfway < -gap / 2)
     }
 
     @Test func noLeadInWhenTheFirstLineStartsAtZero() {
         let ribbon = ribbon([(0, 100), (20, 50)])
         #expect(ribbon.offset(at: 0, duration: 200) == 0)
         #expect(ribbon.offset(at: -3, duration: 200) == 0)
-        #expect(ribbon.offset(at: 10, duration: 200) == ribbon.origins[1] / 2)
+        let halfway = ribbon.offset(at: 10, duration: 200)
+        #expect(halfway > 0)
+        #expect(halfway < ribbon.origins[1] / 2)
     }
 
     @Test func runsOutToTheEndOfTheRibbonAtTheDuration() {
         let ribbon = ribbon([(10, 100), (20, 50)])
-        #expect(ribbon.offset(at: 110, duration: 200) == (ribbon.origins[1] + ribbon.origins[2]) / 2)
+        let halfway = ribbon.offset(at: 110, duration: 200)
+        #expect(halfway > ribbon.origins[1])
+        #expect(halfway < ribbon.origins[2])
         #expect(ribbon.offset(at: 200, duration: 200) == ribbon.origins[2])
         #expect(ribbon.offset(at: 500, duration: 200) == ribbon.origins[2])
     }
@@ -81,35 +115,132 @@ struct LyricsRibbonTests {
         #expect(ribbon.offset(at: 99, duration: 15) == ribbon.origins[1])
     }
 
-    // The scroll animation plays the keyframes, so they must describe the same motion as `offset`.
-    @Test func keyframesInterpolateToTheOffset() {
-        func interpolate(_ keyframes: [(time: TimeInterval, x: CGFloat)], at position: TimeInterval) -> CGFloat {
-            guard let first = keyframes.first, let last = keyframes.last else { return 0 }
-            if position <= first.time { return first.x }
+    @Test func theScrollNeverGoesBackwards() {
+        let ribbon = ribbon(uneven)
+        let curve = ribbon.curve(duration: unevenDuration)
+        // A segment stays monotone as long as both its slopes are within 0…3.
+        #expect(curve.slopes.allSatisfy { $0.start >= 0 && $0.start <= 2 && $0.end >= 0 && $0.end <= 2 })
+
+        var previous = -CGFloat.infinity
+        var wentBack: TimeInterval?
+        for step in 0...Int((unevenDuration + 2) * 100) {
+            let position = TimeInterval(step) / 100 - 1
+            let x = ribbon.offset(at: position, duration: unevenDuration)
+            if x < previous, wentBack == nil {
+                wentBack = position
+            }
+            previous = x
+        }
+        #expect(wentBack == nil)
+    }
+
+    @Test func theSpeedIsTheSameOnBothSidesOfALineBoundary() {
+        let ribbon = ribbon(uneven)
+        let curve = ribbon.curve(duration: unevenDuration)
+        let step = 0.000_01
+
+        func offset(_ position: TimeInterval) -> CGFloat {
+            ribbon.offset(at: position, duration: unevenDuration)
+        }
+        // A secant just short of the node: at the node itself the ribbon may jump to a later line.
+        func speedBefore(_ time: TimeInterval) -> CGFloat {
+            (offset(time - step) - offset(time - 2 * step)) / CGFloat(step)
+        }
+        func speedAfter(_ time: TimeInterval) -> CGFloat {
+            (offset(time + 2 * step) - offset(time + step)) / CGFloat(step)
+        }
+        func averageSpeed(_ segment: Int) -> CGFloat? {
+            let span = curve.nodes[segment + 1].time - curve.nodes[segment].time
+            guard span > 0 else { return nil }
+            return (curve.nodes[segment + 1].x - curve.nodes[segment].x) / CGFloat(span)
+        }
+
+        for index in 1..<curve.nodes.count - 1 {
+            let time = curve.nodes[index].time
+            // Nodes sharing a time are one boundary; it is measured at the later of them.
+            guard curve.nodes[index + 1].time != time else { continue }
+            var before: CGFloat?
+            for segment in (0..<index).reversed() where before == nil {
+                before = averageSpeed(segment)
+            }
+            var after: CGFloat?
+            for segment in index..<curve.slopes.count where after == nil {
+                after = averageSpeed(segment)
+            }
+            let expected = 2 * (before ?? 0) * (after ?? 0) / ((before ?? 0) + (after ?? 0))
+            #expect(expected > 0)
+            #expect(abs(speedBefore(time) - expected) < 0.01 * expected + 0.01)
+            #expect(abs(speedAfter(time) - expected) < 0.01 * expected + 0.01)
+        }
+
+        // The track starts and ends at a standstill.
+        #expect(abs(speedAfter(curve.nodes[0].time)) < 0.01)
+        #expect(abs(speedBefore(unevenDuration)) < 0.01)
+    }
+
+    // The scroll animation plays the nodes with one cubic Bezier timing function per segment, so the
+    // offset must be that same Bezier: solved for u at the wanted x, as Core Animation does.
+    @Test func theCurveIsTheBezierOfItsSlopes() {
+        func axis(_ u: CGFloat, _ first: CGFloat, _ second: CGFloat) -> CGFloat {
+            let rest = 1 - u
+            return 3 * rest * rest * u * first + 3 * rest * u * u * second + u * u * u
+        }
+        func bezier(_ time: CGFloat, _ first: CGFloat, _ second: CGFloat) -> CGFloat {
+            var low: CGFloat = 0
+            var high: CGFloat = 1
+            for _ in 0..<80 {
+                let middle = (low + high) / 2
+                if axis(middle, 1.0 / 3, 2.0 / 3) < time {
+                    low = middle
+                } else {
+                    high = middle
+                }
+            }
+            return axis((low + high) / 2, first, second)
+        }
+        func played(_ curve: LyricsRibbon.Curve, at position: TimeInterval) -> CGFloat {
+            guard let first = curve.nodes.first, let last = curve.nodes.last else { return 0 }
             if position >= last.time { return last.x }
-            // Of keyframes sharing a time, the later one.
-            let next = keyframes.firstIndex { $0.time > position }!
-            let (from, to) = (keyframes[next - 1], keyframes[next])
-            return from.x + (to.x - from.x) * CGFloat((position - from.time) / (to.time - from.time))
+            if position < first.time { return first.x }
+            // Of nodes sharing a time, the later one.
+            let next = curve.nodes.firstIndex { $0.time > position }!
+            let (from, to) = (curve.nodes[next - 1], curve.nodes[next])
+            let slopes = curve.slopes[next - 1]
+            let time = CGFloat((position - from.time) / (to.time - from.time))
+            return from.x + (to.x - from.x) * bezier(time, slopes.start / 3, 1 - slopes.end / 3)
         }
 
         let cases: [(LyricsRibbon, TimeInterval)] = [
+            (ribbon(uneven), unevenDuration),
             (ribbon([(10, 100), (20, 0), (30, 70)]), 200),
             (ribbon([(0, 100), (20, 50)]), 200),
             (ribbon([(10, 100), (20, 50), (20, 60), (30, 70)]), 200),
             (ribbon([(10, 100), (20, 50)]), 15),
         ]
-        for (ribbon, duration) in cases {
-            let keyframes = ribbon.keyframes(duration: duration)
-            #expect(keyframes.first?.time == 0)
-            #expect(keyframes.map(\.time) == keyframes.map(\.time).sorted())
-            for step in 0...120 {
-                let position = TimeInterval(step) * 2
-                let expected = ribbon.offset(at: position, duration: duration)
-                #expect(abs(interpolate(keyframes, at: position) - expected) < 0.0001)
+        for (index, (ribbon, duration)) in cases.enumerated() {
+            let curve = ribbon.curve(duration: duration)
+            #expect(curve.nodes.first?.time == 0)
+            #expect(curve.nodes.map(\.time) == curve.nodes.map(\.time).sorted())
+            #expect(curve.slopes.count == curve.nodes.count - 1)
+            var worst: CGFloat = 0
+            for step in 0...Int((duration + 2) * 20) {
+                let position = TimeInterval(step) / 20 - 1
+                worst = max(worst, abs(played(curve, at: position) - ribbon.offset(at: position, duration: duration)))
             }
+            #expect(worst < 0.0001, "case \(index)")
         }
-        #expect(ribbon([]).keyframes(duration: 200).isEmpty)
+        #expect(ribbon([]).curve(duration: 200).nodes.isEmpty)
+    }
+
+    @Test func theBoundarySpeedIsTheHarmonicMeanOfTheNeighbours() {
+        #expect(LyricsRibbon.Curve.boundarySpeed(before: 10, after: 30) == 15)
+        #expect(LyricsRibbon.Curve.boundarySpeed(before: 8, after: 8) == 8)
+        // At most twice the slower side, which is what keeps the slow segment monotone.
+        #expect(LyricsRibbon.Curve.boundarySpeed(before: 1, after: 1_000) < 2)
+        // Nil stands for no segment to take a speed from: the ends of the track.
+        #expect(LyricsRibbon.Curve.boundarySpeed(before: nil, after: 30) == 0)
+        #expect(LyricsRibbon.Curve.boundarySpeed(before: 10, after: nil) == 0)
+        #expect(LyricsRibbon.Curve.boundarySpeed(before: 0, after: 30) == 0)
     }
 
     @Test func emptyLyricsHaveNoOffset() {

@@ -90,6 +90,38 @@ struct LyricsRibbonViewTests {
         #expect(view.scrollAnimation(now: syncedAt, mediaTime: 1_000) == nil)
     }
 
+    // The keyframes stay on the line boundaries; the pace in between comes from the timing functions.
+    @Test func scrollAnimationTimesEverySegmentWithTheCurveSlopes() throws {
+        let view = LyricsRibbonView(frame: NSRect(x: 0, y: 0, width: 200, height: 22))
+        view.lyrics = lyrics
+        view.playback = state(playing: true, position: 5)
+        let ribbon = try #require(view.ribbon)
+        let curve = ribbon.curve(duration: track.duration)
+
+        let animation = try #require(view.scrollAnimation(now: syncedAt, mediaTime: 1_000))
+        let values = try #require(animation.values as? [CGFloat])
+        let functions = try #require(animation.timingFunctions)
+        #expect(animation.calculationMode == .linear)
+        #expect(functions.count == values.count - 1)
+        #expect(functions.count == curve.slopes.count)
+
+        var point = [Float](repeating: .nan, count: 2)
+        for (index, function) in functions.enumerated() {
+            function.getControlPoint(at: 1, values: &point)
+            #expect(abs(point[0] - 1.0 / 3) < 0.000_01)
+            #expect(abs(point[1] - Float(curve.slopes[index].start) / 3) < 0.000_01)
+            function.getControlPoint(at: 2, values: &point)
+            #expect(abs(point[0] - 2.0 / 3) < 0.000_01)
+            #expect(abs(point[1] - (1 - Float(curve.slopes[index].end) / 3)) < 0.000_01)
+        }
+
+        // The track starts and ends at a standstill, so those two handles sit on the ends.
+        functions.first?.getControlPoint(at: 1, values: &point)
+        #expect(point[1] == 0)
+        functions.last?.getControlPoint(at: 2, values: &point)
+        #expect(point[1] == 1)
+    }
+
     @Test func linesAreLayersAndOnlyTheCurrentOneIsNotDimmed() throws {
         let view = LyricsRibbonView(frame: NSRect(x: 0, y: 0, width: 200, height: 22))
         view.lyrics = lyrics
