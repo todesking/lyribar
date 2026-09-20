@@ -13,6 +13,9 @@ the project uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
   rests for 300 ms at both ends, stops while the track is paused and follows
   seeks. The scrolling is a Core
   Animation instead of a 30 fps timer, which takes the load off the CPU.
+- The timer that follows the current line now runs only while a playing track
+  has lyrics, so the app no longer wakes the main thread ten times a second
+  while Spotify is closed or paused.
 
 ## 0.1.0 - 2026-09-18
 

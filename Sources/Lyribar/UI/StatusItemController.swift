@@ -42,13 +42,15 @@ final class StatusItemController {
         observeChanges(schedule: schedule)
     }
 
-    /// The tick already reads all of these, so this only removes the delay of up to one tick. For the
-    /// playback state that delay is visible: the ribbon keeps scrolling until a pause is rendered.
+    /// Everything that changes the bar without the playback position moving on, so that the tick
+    /// only has to follow the position. `resolver.track` is not observable, but `resolve(track:)`
+    /// always assigns `status`, so observing it also catches the changes of `effectiveStatus`.
     private func observeChanges(schedule: @escaping ObservationLoop.Schedule) {
         changeObservation = ObservationLoop(
             read: { [weak self] in
                 guard let self else { return }
                 _ = monitor.state
+                _ = resolver.status
                 _ = settings.maxWidth
                 _ = settings.showTrackInfo
                 _ = settings.lyricsDisplayMode
@@ -81,18 +83,6 @@ final class StatusItemController {
             }
         }
 
-        let timer = Timer(timeInterval: Self.tickInterval, repeats: true) { [weak self] timer in
-            let alive = MainActor.assumeIsolated {
-                self?.tick(now: Date())
-                return self != nil
-            }
-            if !alive {
-                timer.invalidate()
-            }
-        }
-        // .common keeps the lyrics following the playback while the menu is open.
-        RunLoop.main.add(timer, forMode: .common)
-        self.timer = timer
         tick(now: Date())
     }
 
@@ -102,8 +92,20 @@ final class StatusItemController {
         render(state: state, status: status, now: now)
     }
 
+    /// Whether the current line can move on by itself; every other change reaches the bar through
+    /// `observeChanges`. Paused seeks are not resynced, so they do not move it either.
+    static func wantsTick(state: PlaybackState, status: LyricsResolver.Status) -> Bool {
+        guard state.isPlaying, state.track != nil, case .found = status else { return false }
+        return true
+    }
+
+    // Internal so tests can check that the tick rests while nothing moves.
+    var isTicking: Bool { timer != nil }
+
     // Internal so tests can drive the rendering without Spotify running.
     func render(state: PlaybackState, status: LyricsResolver.Status, now: Date) {
+        // Before the snapshot comparison below: a pause changes the timer, not the content.
+        updateTimer(state: state, status: status)
         // The ribbon interpolates the position between ticks, so it needs every state, not only
         // the ones that change the snapshot.
         barView?.playback = state
@@ -132,6 +134,27 @@ final class StatusItemController {
                     barView.frame = frame
                 }
             }
+        }
+    }
+
+    private func updateTimer(state: PlaybackState, status: LyricsResolver.Status) {
+        let shouldRun = Self.wantsTick(state: state, status: status)
+        if shouldRun, timer == nil {
+            let timer = Timer(timeInterval: Self.tickInterval, repeats: true) { [weak self] timer in
+                let alive = MainActor.assumeIsolated {
+                    self?.tick(now: Date())
+                    return self != nil
+                }
+                if !alive {
+                    timer.invalidate()
+                }
+            }
+            // .common keeps the lyrics following the playback while the menu is open.
+            RunLoop.main.add(timer, forMode: .common)
+            self.timer = timer
+        } else if !shouldRun {
+            timer?.invalidate()
+            timer = nil
         }
     }
 }
