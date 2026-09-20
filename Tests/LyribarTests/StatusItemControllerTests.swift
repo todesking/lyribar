@@ -209,6 +209,34 @@ struct StatusItemControllerTests {
         #expect(barView.maxWidth == 300)
     }
 
+    // The tick only has to run while the current line can move on by itself.
+    @Test func tickRunsOnlyWhileLyricsArePlaying() {
+        let (controller, _, _, cleanup) = makeController()
+        defer { cleanup() }
+        let barView = LyricsBarView(frame: NSRect(x: 0, y: 0, width: 0, height: 22))
+        controller.barView = barView
+
+        let track = TrackInfo(id: "spotify:track:abc", title: "Song", artist: "Artist", duration: 200)
+        let syncedAt = Date(timeIntervalSince1970: 1_000)
+        let status = LyricsResolver.Status.found(
+            SyncedLyrics(lines: [LyricLine(time: 5, text: "short")]), source: "lrclib")
+        let playing = PlaybackState(track: track, isPlaying: true, syncedPosition: 0, syncedAt: syncedAt)
+        let paused = PlaybackState(track: track, isPlaying: false, syncedPosition: 0, syncedAt: syncedAt)
+        let trackless = PlaybackState(track: nil, isPlaying: true, syncedPosition: 0, syncedAt: syncedAt)
+
+        var ticking: [Bool] = []
+        // Back to playing between the cases, so that each one is a stop of its own.
+        for (state, status) in [
+            (playing, status), (paused, status), (playing, status), (playing, .loading),
+            (playing, status), (playing, .notFound), (playing, status), (trackless, status),
+        ] as [(PlaybackState, LyricsResolver.Status)] {
+            controller.render(state: state, status: status, now: syncedAt)
+            ticking.append(controller.isTicking)
+        }
+
+        #expect(ticking == [true, false, true, false, true, false, true, false])
+    }
+
     // Lyrics arrive while the tick is stopped, so the resolver status has to reach the bar on its
     // own. The monitor has no track here, so the refresh is what clears the stale content.
     @Test func lyricsArrivalReachesTheBarView() {
@@ -228,6 +256,7 @@ struct StatusItemControllerTests {
 
         // A cache hit sets the status without the network.
         resolver.resolve(track: track)
+        #expect(controller.isTicking == false)
         scheduler.run()
 
         #expect(barView.content == BarContent())
