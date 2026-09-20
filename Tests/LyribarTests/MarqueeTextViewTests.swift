@@ -55,7 +55,7 @@ struct MarqueeTextViewTests {
         #expect(view.textLayer.string as? String == "")
     }
 
-    @Test func scrollAnimationPlaysTheWholeLineFromThePlaybackPosition() throws {
+    @Test func scrollAnimationPlaysTheLineBetweenTheRestsFromThePlaybackPosition() throws {
         let view = makeView()
         view.line = longLine
         view.playback = state(playing: true, position: 12)
@@ -64,9 +64,9 @@ struct MarqueeTextViewTests {
         #expect(animation.keyPath == "position.x")
         #expect(animation.fromValue as? CGFloat == 0)
         #expect(animation.toValue as? CGFloat == aligned(-distance, in: view))
-        #expect(animation.duration == 20)
-        // 5 s into the line at media time 1000.
-        #expect(animation.beginTime == 995)
+        #expect(abs(animation.duration - 19.4) < 0.001)
+        // 5 s into the line at media time 1000, the scrolling begins 0.3 s into the line.
+        #expect(abs(animation.beginTime - 995.3) < 0.001)
         #expect(animation.fillMode == .both)
         #expect(!animation.isRemovedOnCompletion)
         #expect(!animation.isAdditive)
@@ -83,7 +83,7 @@ struct MarqueeTextViewTests {
         view.line = longLine
         view.playback = state(playing: true, position: 4)
         let animation = try #require(view.scrollAnimation(now: syncedAt, mediaTime: 1_000))
-        #expect(animation.beginTime == 1_006)
+        #expect(abs(animation.beginTime - 1_006.3) < 0.001)
     }
 
     // Scrolling is an animation of the layer instead of redrawing the view.
@@ -99,10 +99,10 @@ struct MarqueeTextViewTests {
         #expect(animation.keyPath == "position.x")
         #expect(animation.fromValue as? CGFloat == 0)
         #expect(animation.toValue as? CGFloat == aligned(-distance, in: view))
-        #expect(animation.duration == 20)
+        #expect(abs(animation.duration - 19.4) < 0.001)
         // Both clocks run at the same pace, so it does not matter when this is compared.
         let mediaTime = view.textLayer.convertTime(CACurrentMediaTime(), from: nil)
-        let expected = mediaTime - (view.playback.position(at: Date()) - 10)
+        let expected = mediaTime - (view.playback.position(at: Date()) - 10.3)
         #expect(abs(animation.beginTime - expected) < 0.05)
     }
 
@@ -137,12 +137,12 @@ struct MarqueeTextViewTests {
         let view = makeView()
         let window = makeWindow(with: view)
         defer { window.close() }
-        view.playback = state(playing: false, position: 15)
+        view.playback = state(playing: false, position: 20)
         view.line = longLine
 
         #expect(scrollAnimation(of: view) == nil)
-        #expect(view.offset(at: Date()) == distance / 4)
-        #expect(view.textLayer.position.x == aligned(-distance / 4, in: view))
+        #expect(abs(view.offset(at: Date()) - distance / 2) < 0.001)
+        #expect(view.textLayer.position.x == aligned(-distance / 2, in: view))
 
         view.playback = state(playing: false, position: 30)
         #expect(view.textLayer.position.x == aligned(-distance, in: view))
@@ -193,7 +193,7 @@ struct MarqueeTextViewTests {
         #expect(after !== before)
         #expect(abs((before.beginTime - after.beginTime) - 13) < 0.05)
         let mediaTime = view.textLayer.convertTime(CACurrentMediaTime(), from: nil)
-        #expect(abs(after.beginTime - (mediaTime - (view.playback.position(at: Date()) - 10))) < 0.05)
+        #expect(abs(after.beginTime - (mediaTime - (view.playback.position(at: Date()) - 10.3))) < 0.05)
     }
 
     @Test func newLineRebuildsTheAnimationOverItsStretch() throws {
@@ -206,9 +206,9 @@ struct MarqueeTextViewTests {
         // The same text again, sung in another stretch.
         view.line = CurrentLineContent(text: longText, start: 30, end: 34)
         let animation = try #require(scrollAnimation(of: view))
-        #expect(animation.duration == 4)
+        #expect(abs(animation.duration - 3.4) < 0.001)
         let mediaTime = view.textLayer.convertTime(CACurrentMediaTime(), from: nil)
-        #expect(abs(animation.beginTime - (mediaTime + 1)) < 0.05)
+        #expect(abs(animation.beginTime - (mediaTime + 1.3)) < 0.05)
     }
 
     @Test func resizingRebuildsTheAnimation() throws {

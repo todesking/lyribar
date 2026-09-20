@@ -10,7 +10,8 @@ the project uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 - With only the current line shown, a line that does not fit now scrolls along
   with the playback: it starts at its beginning when the line starts and reaches
   its end just as the next line starts, instead of looping at a fixed speed. It
-  stops while the track is paused and follows seeks. The scrolling is a Core
+  rests for 300 ms at both ends, stops while the track is paused and follows
+  seeks. The scrolling is a Core
   Animation instead of a 30 fps timer, which takes the load off the CPU.
 
 ## 0.1.0 - 2026-09-18

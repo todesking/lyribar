@@ -2,20 +2,31 @@ import AppKit
 
 /// Scroll offset of an overflowing line as a function of the playback position: the start of the
 /// text is at the left edge when the line starts, the end of it at the right edge when the line ends,
-/// at a steady pace in between.
+/// at a steady pace in between. The text rests for `hold` at both ends of the line.
 enum MarqueeAnimation {
+    static let hold: TimeInterval = 0.3
+
+    /// The part of the line the text scrolls in. A line too short for both rests still scrolls for
+    /// half of its length. Nil when the line has no length.
+    static func scrollStretch(start: TimeInterval, end: TimeInterval) -> ClosedRange<TimeInterval>? {
+        guard end > start else { return nil }
+        let rest = min(hold, (end - start) / 4)
+        return (start + rest)...(end - rest)
+    }
+
     static func offset(
         position: TimeInterval, start: TimeInterval, end: TimeInterval, textWidth: CGFloat, availableWidth: CGFloat
     ) -> CGFloat {
         let distance = textWidth - availableWidth
-        guard distance > 0, end > start else { return 0 }
-        let progress = min(max((position - start) / (end - start), 0), 1)
+        guard distance > 0, let stretch = scrollStretch(start: start, end: end) else { return 0 }
+        let length = stretch.upperBound - stretch.lowerBound
+        let progress = min(max((position - stretch.lowerBound) / length, 0), 1)
         return distance * CGFloat(progress)
     }
 }
 
 /// The text is a layer and scrolling only moves it, see `BarTextLayer`. While playing, one animation
-/// over the stretch of the line scrolls that layer, so the scrolling does not depend on the main
+/// over the scroll stretch of the line scrolls that layer, so the scrolling does not depend on the main
 /// thread.
 @MainActor
 final class MarqueeTextView: NSView {
@@ -133,13 +144,15 @@ final class MarqueeTextView: NSView {
     /// The scrolling of the whole line, to be started at `mediaTime` for the playback position at
     /// `now`. Nil when the text rests: it fits, the line has no length, or the playback is paused.
     func scrollAnimation(now: Date, mediaTime: CFTimeInterval) -> CABasicAnimation? {
-        guard let line, overflows, line.end > line.start, playback.isPlaying else { return nil }
+        guard let line, overflows, playback.isPlaying,
+            let stretch = MarqueeAnimation.scrollStretch(start: line.start, end: line.end)
+        else { return nil }
 
         let animation = CABasicAnimation(keyPath: "position.x")
         animation.fromValue = CGFloat(0)
         animation.toValue = aligned(bounds.width - ceil(textSize.width))
-        animation.duration = line.end - line.start
-        animation.beginTime = mediaTime - (playback.position(at: now) - line.start)
+        animation.duration = stretch.upperBound - stretch.lowerBound
+        animation.beginTime = mediaTime - (playback.position(at: now) - stretch.lowerBound)
         animation.timingFunction = CAMediaTimingFunction(name: .linear)
         animation.fillMode = .both
         animation.isRemovedOnCompletion = false

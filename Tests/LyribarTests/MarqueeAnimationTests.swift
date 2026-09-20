@@ -31,10 +31,38 @@ struct MarqueeAnimationTests {
         #expect(offset(1_000) == 60)
     }
 
+    @Test func restsAtBothEndsOfTheLine() {
+        #expect(offset(10.15) == 0)
+        #expect(offset(10.3) == 0)
+        #expect(offset(10.4) > 0)
+        #expect(offset(13.6) < 60)
+        #expect(offset(13.7) == 60)
+        #expect(offset(13.85) == 60)
+    }
+
+    // Over the 3.4 s between the rests.
     @Test func scrollsAtASteadyPaceInBetween() {
-        #expect(offset(11) == 15)
-        #expect(offset(12) == 30)
-        #expect(offset(13) == 45)
+        #expect(abs(offset(11.15) - 15) < 0.001)
+        #expect(abs(offset(12) - 30) < 0.001)
+        #expect(abs(offset(12.85) - 45) < 0.001)
+    }
+
+    @Test func scrollStretchLeavesTheRestsOut() throws {
+        let stretch = try #require(MarqueeAnimation.scrollStretch(start: 10, end: 14))
+        #expect(abs(stretch.lowerBound - 10.3) < 0.001)
+        #expect(abs(stretch.upperBound - 13.7) < 0.001)
+        #expect(MarqueeAnimation.scrollStretch(start: 10, end: 10) == nil)
+        #expect(MarqueeAnimation.scrollStretch(start: 10, end: 4) == nil)
+    }
+
+    // A line too short for both rests scrolls for half of its length.
+    @Test func shortLineShortensTheRests() throws {
+        let stretch = try #require(MarqueeAnimation.scrollStretch(start: 10, end: 10.2))
+        #expect(abs(stretch.lowerBound - 10.05) < 0.001)
+        #expect(abs(stretch.upperBound - 10.15) < 0.001)
+        let middle = MarqueeAnimation.offset(
+            position: 10.1, start: 10, end: 10.2, textWidth: 160, availableWidth: 100)
+        #expect(abs(middle - 30) < 0.001)
     }
 
     @Test func staysStillWhenTheLineHasNoLength() {
