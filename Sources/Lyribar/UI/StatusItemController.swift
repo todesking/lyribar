@@ -42,13 +42,15 @@ final class StatusItemController {
         observeChanges(schedule: schedule)
     }
 
-    /// The tick already reads all of these, so this only removes the delay of up to one tick. For the
-    /// playback state that delay is visible: the ribbon keeps scrolling until a pause is rendered.
+    /// Everything that changes the bar without the playback position moving on, so that the tick
+    /// only has to follow the position. `resolver.track` is not observable, but `resolve(track:)`
+    /// always assigns `status`, so observing it also catches the changes of `effectiveStatus`.
     private func observeChanges(schedule: @escaping ObservationLoop.Schedule) {
         changeObservation = ObservationLoop(
             read: { [weak self] in
                 guard let self else { return }
                 _ = monitor.state
+                _ = resolver.status
                 _ = settings.maxWidth
                 _ = settings.showTrackInfo
                 _ = settings.lyricsDisplayMode

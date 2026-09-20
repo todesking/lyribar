@@ -29,7 +29,9 @@ private final class Recorder {
 
 @MainActor
 struct StatusItemControllerTests {
-    private func makeController() -> (StatusItemController, Settings, ManualScheduler, () -> Void) {
+    private func makeController(
+        resolver: LyricsResolver? = nil
+    ) -> (StatusItemController, Settings, ManualScheduler, () -> Void) {
         let suite = "LyribarTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         let settings = Settings(defaults: defaults)
@@ -38,7 +40,7 @@ struct StatusItemControllerTests {
         let scheduler = ManualScheduler()
         let controller = StatusItemController(
             monitor: PlaybackMonitor(),
-            resolver: LyricsResolver(provider: LRCLibProvider(), cache: cache),
+            resolver: resolver ?? LyricsResolver(provider: LRCLibProvider(), cache: cache),
             settings: settings,
             schedule: { work in scheduler.enqueue(work) })
         return (controller, settings, scheduler, { defaults.removePersistentDomain(forName: suite) })
@@ -201,6 +203,31 @@ struct StatusItemControllerTests {
         controller.barView = barView
 
         settings.showTrackInfo = false
+        scheduler.run()
+
+        #expect(barView.content == BarContent())
+        #expect(barView.maxWidth == 300)
+    }
+
+    // Lyrics arrive while the tick is stopped, so the resolver status has to reach the bar on its
+    // own. The monitor has no track here, so the refresh is what clears the stale content.
+    @Test func lyricsArrivalReachesTheBarView() {
+        let directory = URL.temporaryDirectory.appending(path: "lyribar-resolver-\(UUID().uuidString)")
+        let cache = LyricsCache(directory: directory)
+        let track = TrackInfo(id: "spotify:track:abc", title: "Song", artist: "Artist", duration: 200)
+        cache.set(track, lyrics: SyncedLyrics(lines: [LyricLine(time: 0, text: "line")]), source: "lrclib")
+        let resolver = LyricsResolver(provider: LRCLibProvider(), cache: cache)
+        let (controller, _, scheduler, cleanup) = makeController(resolver: resolver)
+        defer {
+            cleanup()
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let barView = LyricsBarView(frame: NSRect(x: 0, y: 0, width: 0, height: 22))
+        barView.update(content: BarContent(lyric: CurrentLineContent(text: "stale", start: 0, end: 1), trackInfo: "Song – Artist"), maxWidth: 999)
+        controller.barView = barView
+
+        // A cache hit sets the status without the network.
+        resolver.resolve(track: track)
         scheduler.run()
 
         #expect(barView.content == BarContent())
