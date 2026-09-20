@@ -39,9 +39,6 @@ final class LyricsRibbonView: NSView {
     static let scrollAnimationKey = "scroll"
     static let settleAnimationKey = "settle"
     static let freezeAnimationKey = "freeze"
-    static let settleDuration: TimeInterval = 0.25
-    /// Farther than that is a seek.
-    static let maxSettleDistance: CGFloat = 80
     static let spaceSettleDuration: TimeInterval = 0.4
     /// Found by eye on macOS 27: shorter and the glide is over before the live layers are back.
     static let spaceFreezeDuration: TimeInterval = 0.5
@@ -181,7 +178,7 @@ final class LyricsRibbonView: NSView {
         }
         let delta = spaceChange.x - positionX(at: now.addingTimeInterval(freeze))
         // Not a seek however far it is: the snapshot is older after a held refresh.
-        if let animation = settleAnimation(from: delta, duration: Self.spaceSettleDuration, limit: .infinity) {
+        if let animation = BarTextLayer.settleAnimation(from: delta, duration: Self.spaceSettleDuration, limit: .infinity) {
             animation.beginTime = mediaTime + freeze
             ribbonLayer.add(animation, forKey: Self.settleAnimationKey)
         }
@@ -277,7 +274,7 @@ final class LyricsRibbonView: NSView {
         if let spaceChange, let spaceChangeEnd, now < spaceChangeEnd {
             glidingFrom = anchorX - spaceChange.x
         } else if let shownX = shownX ?? ribbonLayer.presentation()?.position.x {
-            if abs(shownX - positionX(at: now)) <= Self.maxSettleDistance {
+            if abs(shownX - positionX(at: now)) <= BarTextLayer.maxSettleDistance {
                 glidingFrom = anchorX - shownX
             } else {
                 offsets.append(anchorX - shownX)
@@ -366,25 +363,10 @@ final class LyricsRibbonView: NSView {
         }
         if let spaceChange, now < spaceChange.at.addingTimeInterval(Self.spaceFreezeDuration) {
             addSpaceChangeAnimations(now: now)
-        } else if let shownX, let animation = settleAnimation(from: shownX - positionX(at: now)) {
+        } else if let shownX, let animation = BarTextLayer.settleAnimation(from: shownX - positionX(at: now)) {
             ribbonLayer.add(animation, forKey: Self.settleAnimationKey)
         }
         updateAttachedLines(now: now, shownX: shownX)
-    }
-
-    /// A pause arrives late, so the ribbon has scrolled past the position it reports; resyncs are a
-    /// little off too. Small corrections glide instead of jumping. Nil for seeks and for no correction.
-    func settleAnimation(
-        from delta: CGFloat, duration: TimeInterval = settleDuration, limit: CGFloat = maxSettleDistance
-    ) -> CABasicAnimation? {
-        guard delta != 0, abs(delta) <= limit else { return nil }
-        let animation = CABasicAnimation(keyPath: "position.x")
-        animation.isAdditive = true
-        animation.fromValue = delta
-        animation.toValue = 0
-        animation.duration = duration
-        animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        return animation
     }
 
     /// A snapshot is shown at some time during the interval it is valid for, so while scrolling it

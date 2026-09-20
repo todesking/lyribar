@@ -265,7 +265,7 @@ struct LyricsRibbonViewTests {
         let offset = view.offset(at: now)
         let modelX = view.ribbonLayer.position.x
 
-        for delta in [LyricsRibbonView.maxSettleDistance, -LyricsRibbonView.maxSettleDistance] {
+        for delta in [BarTextLayer.maxSettleDistance, -BarTextLayer.maxSettleDistance] {
             view.updateAttachedLines(now: now, shownX: modelX + delta)
             for step in stride(from: CGFloat(0), through: 1, by: 0.05) {
                 let inView = try visible(view, offset: offset - delta * step)
@@ -280,7 +280,7 @@ struct LyricsRibbonViewTests {
         let now = Date()
         view.lyrics = longLyrics
         // Short of the limit: the view rests at its own, slightly later, idea of now.
-        let ahead = LyricsRibbonView.maxSettleDistance - 2
+        let ahead = BarTextLayer.maxSettleDistance - 2
         for position in stride(from: TimeInterval(100), to: 104, by: 0.25) {
             view.playback = longState(position: position, at: now)
             view.updateAttachedLines(now: now, shownX: view.ribbonLayer.position.x - ahead)
@@ -548,19 +548,17 @@ struct LyricsRibbonViewTests {
     }
 
     @Test func smallCorrectionsGlideAndSeeksJump() throws {
-        let view = LyricsRibbonView(frame: NSRect(x: 0, y: 0, width: 200, height: 22))
-
-        let animation = try #require(view.settleAnimation(from: -8))
+        let animation = try #require(BarTextLayer.settleAnimation(from: -8))
         #expect(animation.keyPath == "position.x")
         #expect(animation.isAdditive)
         #expect(animation.fromValue as? CGFloat == -8)
         #expect(animation.toValue as? CGFloat == 0)
-        #expect(animation.duration == LyricsRibbonView.settleDuration)
+        #expect(animation.duration == BarTextLayer.settleDuration)
 
-        #expect(view.settleAnimation(from: 0) == nil)
-        #expect(view.settleAnimation(from: LyricsRibbonView.maxSettleDistance + 1) == nil)
-        #expect(view.settleAnimation(from: -LyricsRibbonView.maxSettleDistance - 1) == nil)
-        #expect(view.settleAnimation(from: 500, limit: .infinity) != nil)
+        #expect(BarTextLayer.settleAnimation(from: 0) == nil)
+        #expect(BarTextLayer.settleAnimation(from: BarTextLayer.maxSettleDistance + 1) == nil)
+        #expect(BarTextLayer.settleAnimation(from: -BarTextLayer.maxSettleDistance - 1) == nil)
+        #expect(BarTextLayer.settleAnimation(from: 500, limit: .infinity) != nil)
     }
 
     @Test func clicksFallThrough() {
