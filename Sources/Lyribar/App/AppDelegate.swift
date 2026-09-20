@@ -29,9 +29,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The login item may have been removed in System Settings since the last run.
         launchAtLogin.syncFromSystem()
 
-        // A saved or removed cookie changes where the lyrics of the current track come from.
+        // A saved or removed cookie changes where the lyrics of the current track come from, so the
+        // cached result of the previous conditions must not win.
         spotifyAccount.onChange = { [weak self] in
-            self?.lyricsResolver.retry()
+            self?.lyricsResolver.refetch()
         }
 
         let controller = StatusItemController(
