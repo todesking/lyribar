@@ -46,8 +46,9 @@ even when the timings of the lyrics are a little off. An instrumental passage
 shows up as a gap, and a paused track keeps the ribbon where it is.
 
 With **Lyrics display** set to **Current line only**, the item shows just the
-current line instead: a line that is too wide scrolls back and forth, a short one
-sits at the left, and an instrumental passage leaves the space empty.
+current line instead: a line that is too wide scrolls along with the playback, from
+its beginning when the line starts to its end when the next line starts, a short
+one sits at the left, and an instrumental passage leaves the space empty.
 
 While the track has lyrics the item keeps the configured maximum width in both
 modes, so the rest of the menu bar does not shift from line to line. The track
