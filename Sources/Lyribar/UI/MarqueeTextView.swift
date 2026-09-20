@@ -122,7 +122,7 @@ final class MarqueeTextView: NSView {
         BarTextLayer.pixelAligned(x, scale: BarTextLayer.scale(for: self))
     }
 
-    /// Moves the model position; while the animation runs, only the snapshots show it.
+    /// Moves the model position; while the animation runs, it only shows when the animation does not.
     func updatePosition(now: Date) {
         BarTextLayer.withoutActions {
             textLayer.position = CGPoint(
@@ -174,8 +174,8 @@ final class MarqueeTextView: NSView {
     }
 
     /// Seeks, pauses and resyncs all arrive as a new `playback`, so the animation is simply rebuilt.
-    /// The snapshots AppKit keeps of the button show the model position. While the animation runs it
-    /// stays where the last redraw had it; while the text rests, nothing else would redraw them.
+    /// The snapshots AppKit keeps of the button show the model position as of the last redraw. While
+    /// the animation runs they are left alone; while the text rests, nothing else would redraw them.
     private func updateScrolling(redraws: Bool = false, glides: Bool = true) {
         let now = Date()
         let shownX = shownX()
@@ -186,13 +186,11 @@ final class MarqueeTextView: NSView {
 
         var redraws = redraws
         let mediaTime = textLayer.convertTime(CACurrentMediaTime(), from: nil)
+        // Also while the animation runs: a frame that misses it shows the model position.
+        updatePosition(now: now)
         if window != nil, let animation = scrollAnimation(now: now, mediaTime: mediaTime) {
             textLayer.add(animation, forKey: Self.scrollAnimationKey)
-            if redraws {
-                updatePosition(now: now)
-            }
         } else {
-            updatePosition(now: now)
             redraws = redraws || wasScrolling || textLayer.position != oldPosition
         }
         if redraws {
