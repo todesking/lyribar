@@ -6,6 +6,13 @@ func cacheSizeText(bytes: Int, locale: Locale = .current) -> String {
     return "Cache: " + Int64(bytes).formatted(.byteCount(style: .file).locale(locale))
 }
 
+/// "Lyribar 1.2.0", or "Lyribar (development build)" when there is no `Info.plist`
+/// (the raw binary from `swift run`).
+func versionText(shortVersion: String?) -> String {
+    guard let shortVersion, !shortVersion.isEmpty else { return "Lyribar (development build)" }
+    return "Lyribar " + shortVersion
+}
+
 struct SettingsView: View {
     static let maxWidthRange: ClosedRange<Double> = 150...600
     static let maxWidthStep: Double = 10
@@ -95,6 +102,13 @@ struct SettingsView: View {
                     Text(cacheSizeText(bytes: cacheSize))
                         .foregroundStyle(.secondary)
                 }
+            }
+
+            Section {
+                Text(versionText(shortVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String))
+                    .foregroundStyle(.secondary)
+                    .font(.footnote)
+                    .frame(maxWidth: .infinity)
             }
         }
         .formStyle(.grouped)
