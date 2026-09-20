@@ -16,6 +16,15 @@ struct SettingsViewTests {
         #expect(Lyribar.cacheSizeText(bytes: 0, locale: locale) == "Cache: empty")
     }
 
+    @Test func versionTextShowsTheShortVersion() {
+        #expect(Lyribar.versionText(shortVersion: "1.2.0") == "Lyribar 1.2.0")
+    }
+
+    @Test func versionTextFallsBackWithoutAnInfoPlist() {
+        #expect(Lyribar.versionText(shortVersion: nil) == "Lyribar (development build)")
+        #expect(Lyribar.versionText(shortVersion: "") == "Lyribar (development build)")
+    }
+
     @Test func maxWidthSliderCoversTheSettingRange() {
         #expect(SettingsView.maxWidthRange == 150...600)
         #expect(SettingsView.maxWidthStep == 10)
