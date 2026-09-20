@@ -9,7 +9,7 @@ final class LyricsBarView: NSView {
     // Internal so tests can check which one takes the lyric area.
     let marquee = MarqueeTextView(frame: .zero)
     let ribbonView = LyricsRibbonView(frame: .zero)
-    private let trackLabel = NSTextField(labelWithString: "")
+    private let trackInfoView = TrackInfoView(frame: .zero)
     private let iconView = NSImageView(frame: .zero)
 
     private(set) var content = BarContent()
@@ -29,12 +29,6 @@ final class LyricsBarView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
 
-        trackLabel.font = MarqueeTextView.font
-        trackLabel.textColor = .secondaryLabelColor
-        trackLabel.lineBreakMode = .byTruncatingTail
-        trackLabel.maximumNumberOfLines = 1
-        trackLabel.cell?.usesSingleLineMode = true
-
         let image = NSImage(systemSymbolName: "music.note.list", accessibilityDescription: "Lyribar")
         image?.isTemplate = true
         iconView.image = image
@@ -42,7 +36,7 @@ final class LyricsBarView: NSView {
 
         addSubview(marquee)
         addSubview(ribbonView)
-        addSubview(trackLabel)
+        addSubview(trackInfoView)
         addSubview(iconView)
         update(content: content, maxWidth: maxWidth)
     }
@@ -55,22 +49,28 @@ final class LyricsBarView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     func update(content: BarContent, maxWidth: CGFloat) {
+        let showedRibbon = self.content.ribbon != nil
         self.content = content
         self.maxWidth = maxWidth
 
         marquee.text = content.lyric ?? ""
         ribbonView.lyrics = content.ribbon?.lyrics
         ribbonView.currentIndex = content.ribbon?.currentIndex
-        trackLabel.stringValue = content.trackInfo ?? ""
-        layoutResult = BarLayout.compute(
+        trackInfoView.text = content.trackInfo ?? ""
+        let newLayout = BarLayout.compute(
             // The ribbon has no width of its own; its room comes from `reservesLyricWidth`.
             lyricWidth: content.ribbon == nil ? content.lyric.map(MarqueeTextView.width(of:)) : nil,
-            // NSTextField draws its text inset from the frame.
-            trackInfoWidth: content.trackInfo.map { _ in ceil(trackLabel.intrinsicContentSize.width) },
+            trackInfoWidth: content.trackInfo.map(TrackInfoView.width(of:)),
             iconWidth: Self.iconWidth,
             maxWidth: maxWidth,
             reservesLyricWidth: content.reservesLyricWidth
         )
+        // Most updates only move the highlight. Inside a status bar button every layout pass makes
+        // AppKit snapshot the button again, which is slow enough to stall the scrolling.
+        let showsRibbon = content.ribbon != nil
+        guard newLayout != layoutResult || showsRibbon != showedRibbon || frame.width != newLayout.totalWidth
+        else { return }
+        layoutResult = newLayout
         setFrameSize(NSSize(width: layoutResult.totalWidth, height: frame.height))
         needsLayout = true
     }
@@ -88,12 +88,10 @@ final class LyricsBarView: NSView {
             ribbonView.frame = frame
         }
 
-        trackLabel.isHidden = layoutResult.trackInfo == nil
+        trackInfoView.isHidden = layoutResult.trackInfo == nil
         if let range = layoutResult.trackInfo {
-            let labelHeight = trackLabel.intrinsicContentSize.height
-            trackLabel.frame = NSRect(
-                x: range.lowerBound, y: ((height - labelHeight) / 2).rounded(),
-                width: range.upperBound - range.lowerBound, height: labelHeight)
+            trackInfoView.frame = NSRect(
+                x: range.lowerBound, y: 0, width: range.upperBound - range.lowerBound, height: height)
         }
 
         let icon = layoutResult.icon

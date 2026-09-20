@@ -55,6 +55,22 @@ struct LyricsRibbon: Equatable {
             position, from: (lines[low].time, origins[low]), to: (lines[low + 1].time, origins[low + 1]))
     }
 
+    /// The points `offset(at:duration:)` interpolates between, in time order. Empty without lines.
+    func keyframes(duration: TimeInterval) -> [(time: TimeInterval, x: CGFloat)] {
+        guard let first = lines.first, let last = lines.last else { return [] }
+        var keyframes: [(time: TimeInterval, x: CGFloat)] = []
+        if first.time > 0 {
+            keyframes.append((0, origins[0] - Self.gap))
+        }
+        for index in lines.indices {
+            keyframes.append((lines[index].time, origins[index]))
+        }
+        if duration > last.time {
+            keyframes.append((duration, origins[lines.count]))
+        }
+        return keyframes
+    }
+
     /// Lines with text that intersect the viewport, with their x in viewport coordinates.
     func visibleLines(offset: CGFloat, viewportWidth: CGFloat) -> [(index: Int, x: CGFloat)] {
         let anchor = viewportWidth * Self.anchorShare

@@ -51,6 +51,38 @@ struct LyricsBarViewTests {
         #expect(view.layoutResult.lyric != nil)
     }
 
+    // A layout pass makes AppKit snapshot the status bar button, which stalls the scrolling.
+    @Test func movingTheHighlightDoesNotRequestLayout() {
+        let view = LyricsBarView(frame: NSRect(x: 0, y: 0, width: 0, height: 22))
+        func content(currentIndex: Int) -> BarContent {
+            BarContent(
+                ribbon: RibbonContent(lyrics: lyrics, currentIndex: currentIndex), trackInfo: "Song – Artist",
+                reservesLyricWidth: true)
+        }
+        view.update(content: content(currentIndex: 0), maxWidth: 300)
+        #expect(view.needsLayout)
+        view.layoutSubtreeIfNeeded()
+        #expect(!view.needsLayout)
+
+        view.update(content: content(currentIndex: 2), maxWidth: 300)
+        #expect(!view.needsLayout)
+        #expect(view.ribbonView.currentIndex == 2)
+
+        view.update(content: content(currentIndex: 2), maxWidth: 250)
+        #expect(view.needsLayout)
+    }
+
+    // An NSTextField in a status bar button makes AppKit re-snapshot the button in a busy loop.
+    @Test func containsNoTextField() {
+        let view = LyricsBarView(frame: NSRect(x: 0, y: 0, width: 0, height: 22))
+        view.update(content: BarContent(lyric: "la la", trackInfo: "Song – Artist"), maxWidth: 300)
+        var pending: [NSView] = [view]
+        while let next = pending.popLast() {
+            #expect(!(next is NSTextField))
+            pending.append(contentsOf: next.subviews)
+        }
+    }
+
     private let lyrics = SyncedLyrics(lines: [
         LyricLine(time: 10, text: "first"),
         LyricLine(time: 20, text: ""),

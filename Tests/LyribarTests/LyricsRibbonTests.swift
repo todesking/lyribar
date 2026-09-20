@@ -81,6 +81,37 @@ struct LyricsRibbonTests {
         #expect(ribbon.offset(at: 99, duration: 15) == ribbon.origins[1])
     }
 
+    // The scroll animation plays the keyframes, so they must describe the same motion as `offset`.
+    @Test func keyframesInterpolateToTheOffset() {
+        func interpolate(_ keyframes: [(time: TimeInterval, x: CGFloat)], at position: TimeInterval) -> CGFloat {
+            guard let first = keyframes.first, let last = keyframes.last else { return 0 }
+            if position <= first.time { return first.x }
+            if position >= last.time { return last.x }
+            // Of keyframes sharing a time, the later one.
+            let next = keyframes.firstIndex { $0.time > position }!
+            let (from, to) = (keyframes[next - 1], keyframes[next])
+            return from.x + (to.x - from.x) * CGFloat((position - from.time) / (to.time - from.time))
+        }
+
+        let cases: [(LyricsRibbon, TimeInterval)] = [
+            (ribbon([(10, 100), (20, 0), (30, 70)]), 200),
+            (ribbon([(0, 100), (20, 50)]), 200),
+            (ribbon([(10, 100), (20, 50), (20, 60), (30, 70)]), 200),
+            (ribbon([(10, 100), (20, 50)]), 15),
+        ]
+        for (ribbon, duration) in cases {
+            let keyframes = ribbon.keyframes(duration: duration)
+            #expect(keyframes.first?.time == 0)
+            #expect(keyframes.map(\.time) == keyframes.map(\.time).sorted())
+            for step in 0...120 {
+                let position = TimeInterval(step) * 2
+                let expected = ribbon.offset(at: position, duration: duration)
+                #expect(abs(interpolate(keyframes, at: position) - expected) < 0.0001)
+            }
+        }
+        #expect(ribbon([]).keyframes(duration: 200).isEmpty)
+    }
+
     @Test func emptyLyricsHaveNoOffset() {
         let ribbon = ribbon([])
         #expect(ribbon.origins == [0])

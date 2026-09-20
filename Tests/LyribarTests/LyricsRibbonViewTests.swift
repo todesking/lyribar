@@ -53,6 +53,63 @@ struct LyricsRibbonViewTests {
         #expect(view.offset(at: syncedAt.addingTimeInterval(60)) == ribbon.origins[2])
     }
 
+    // Scrolling moves the layer instead of redrawing the view.
+    @Test func ribbonLayerFollowsTheOffset() throws {
+        let view = LyricsRibbonView(frame: NSRect(x: 0, y: 0, width: 200, height: 22))
+        view.lyrics = lyrics
+        view.playback = state(playing: true, position: 5)
+        let ribbon = try #require(view.ribbon)
+        let anchor = 200 * LyricsRibbon.anchorShare
+
+        view.updatePosition(now: syncedAt.addingTimeInterval(5))
+        #expect(view.ribbonLayer.position.x == anchor - ribbon.origins[0])
+        view.updatePosition(now: syncedAt.addingTimeInterval(25))
+        #expect(view.ribbonLayer.position.x == anchor - ribbon.origins[2])
+    }
+
+    @Test func scrollAnimationPlaysTheWholeTrackFromThePlaybackPosition() throws {
+        let view = LyricsRibbonView(frame: NSRect(x: 0, y: 0, width: 200, height: 22))
+        view.lyrics = lyrics
+        view.playback = state(playing: true, position: 5)
+        let ribbon = try #require(view.ribbon)
+        let anchor = 200 * LyricsRibbon.anchorShare
+
+        let animation = try #require(view.scrollAnimation(now: syncedAt.addingTimeInterval(7), mediaTime: 1_000))
+        #expect(animation.keyPath == "position.x")
+        #expect(animation.duration == 200)
+        // 12 s into the track at media time 1000.
+        #expect(animation.beginTime == 988)
+        #expect(animation.keyTimes == [0, 0.05, 0.1, 0.15, 1])
+        let values = try #require(animation.values as? [CGFloat])
+        #expect(values == [
+            anchor - (ribbon.origins[0] - LyricsRibbon.gap), anchor - ribbon.origins[0], anchor - ribbon.origins[1],
+            anchor - ribbon.origins[2], anchor - ribbon.origins[3],
+        ])
+
+        view.lyrics = nil
+        #expect(view.scrollAnimation(now: syncedAt, mediaTime: 1_000) == nil)
+    }
+
+    @Test func linesAreLayersAndOnlyTheCurrentOneIsNotDimmed() throws {
+        let view = LyricsRibbonView(frame: NSRect(x: 0, y: 0, width: 200, height: 22))
+        view.lyrics = lyrics
+        view.currentIndex = 2
+        let ribbon = try #require(view.ribbon)
+
+        #expect(view.lineLayers.count == 3)
+        #expect(view.lineLayers[1] == nil)
+        let first = try #require(view.lineLayers[0])
+        let third = try #require(view.lineLayers[2])
+        #expect(first.string as? String == "first")
+        #expect(third.position.x == ribbon.origins[2])
+        #expect(first.opacity == LyricsRibbonView.dimmedAlpha)
+        #expect(third.opacity == 1)
+
+        view.lyrics = nil
+        #expect(view.lineLayers.isEmpty)
+        #expect(view.ribbonLayer.sublayers?.isEmpty ?? true)
+    }
+
     @Test func animatesOnlyWhilePlayingWithLyrics() {
         let view = LyricsRibbonView(frame: NSRect(x: 0, y: 0, width: 200, height: 22))
         #expect(!view.wantsAnimation)
@@ -84,15 +141,19 @@ struct LyricsRibbonViewTests {
         window.isReleasedWhenClosed = false
         window.contentView?.addSubview(view)
         #expect(view.isAnimating)
+        #expect(view.ribbonLayer.animation(forKey: LyricsRibbonView.scrollAnimationKey) != nil)
 
         view.playback = state(playing: false)
         #expect(!view.isAnimating)
+        #expect(view.ribbonLayer.animation(forKey: LyricsRibbonView.scrollAnimationKey) == nil)
 
         view.playback = state(playing: true)
         #expect(view.isAnimating)
+        #expect(view.ribbonLayer.animation(forKey: LyricsRibbonView.scrollAnimationKey) != nil)
 
         view.removeFromSuperview()
         #expect(!view.isAnimating)
+        #expect(view.ribbonLayer.animation(forKey: LyricsRibbonView.scrollAnimationKey) == nil)
     }
 
     @Test func clicksFallThrough() {

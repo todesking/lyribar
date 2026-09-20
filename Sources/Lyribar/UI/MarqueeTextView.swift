@@ -18,6 +18,7 @@ enum MarqueeAnimation {
     }
 }
 
+/// The text is a layer and scrolling only moves it, see `BarTextLayer`.
 @MainActor
 final class MarqueeTextView: NSView {
     static let frameInterval: TimeInterval = 1.0 / 30.0
@@ -32,17 +33,27 @@ final class MarqueeTextView: NSView {
         didSet {
             guard text != oldValue else { return }
             textSize = NSAttributedString(string: text, attributes: [.font: Self.font]).size()
+            BarTextLayer.withoutActions {
+                BarTextLayer.setText(text, size: textSize, on: textLayer)
+            }
             restart()
         }
     }
 
+    // Internal so tests can check the scrolling.
+    let textLayer = BarTextLayer.make()
     private var textSize: CGSize = .zero
     private var startedAt = Date()
     private var timer: Timer?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        let host = CALayer()
+        host.masksToBounds = true
+        layer = host
+        wantsLayer = true
         clipsToBounds = true
+        host.addSublayer(textLayer)
     }
 
     @available(*, unavailable)
@@ -53,32 +64,56 @@ final class MarqueeTextView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     override func setFrameSize(_ newSize: NSSize) {
-        let widthChanged = newSize.width != frame.width
+        let changed = newSize != frame.size
         super.setFrameSize(newSize)
-        if widthChanged {
+        if changed {
             updateTimer()
+            updatePosition(now: Date())
             needsDisplay = true
         }
     }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        updateScale()
         updateTimer()
     }
 
-    override func draw(_ dirtyRect: NSRect) {
-        guard !text.isEmpty else { return }
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        updateScale()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateColor()
+    }
+
+    func updatePosition(now: Date) {
         let offset = MarqueeAnimation.offset(
-            elapsed: Date().timeIntervalSince(startedAt),
+            elapsed: now.timeIntervalSince(startedAt),
             textWidth: ceil(textSize.width),
             availableWidth: bounds.width
         )
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: Self.font,
-            .foregroundColor: NSColor.labelColor,
-        ]
-        let origin = NSPoint(x: -offset, y: ((bounds.height - textSize.height) / 2).rounded())
-        (text as NSString).draw(at: origin, withAttributes: attributes)
+        BarTextLayer.withoutActions {
+            textLayer.position = CGPoint(
+                x: BarTextLayer.pixelAligned(-offset, scale: BarTextLayer.scale(for: self)),
+                y: ((bounds.height - textLayer.bounds.height) / 2).rounded())
+        }
+    }
+
+    private func updateColor() {
+        let color = BarTextLayer.labelColor(for: self)
+        guard color != textLayer.foregroundColor else { return }
+        BarTextLayer.withoutActions {
+            textLayer.foregroundColor = color
+        }
+    }
+
+    private func updateScale() {
+        BarTextLayer.withoutActions {
+            textLayer.contentsScale = BarTextLayer.scale(for: self)
+        }
     }
 
     private var overflows: Bool {
@@ -87,7 +122,10 @@ final class MarqueeTextView: NSView {
 
     private func restart() {
         startedAt = Date()
+        updateColor()
         updateTimer()
+        updatePosition(now: startedAt)
+        // Once per text, so that the snapshots AppKit keeps of the button do not go stale.
         needsDisplay = true
     }
 
@@ -96,7 +134,7 @@ final class MarqueeTextView: NSView {
         if shouldRun, timer == nil {
             let timer = Timer(timeInterval: Self.frameInterval, repeats: true) { [weak self] timer in
                 let alive = MainActor.assumeIsolated {
-                    self?.needsDisplay = true
+                    self?.updatePosition(now: Date())
                     return self != nil
                 }
                 if !alive {
