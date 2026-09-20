@@ -125,11 +125,13 @@ struct LyricsRibbonViewTests {
     @Test func linesAreLayersAndOnlyTheCurrentOneIsNotDimmed() throws {
         let view = LyricsRibbonView(frame: NSRect(x: 0, y: 0, width: 200, height: 22))
         view.lyrics = lyrics
+        // Resting on the interlude, with both lines in view.
+        view.playback = state(playing: false, position: 20)
         view.currentIndex = 2
         let ribbon = try #require(view.ribbon)
 
-        #expect(view.lineLayers.count == 3)
-        #expect(view.lineLayers[1] == nil)
+        #expect(view.lineLayers.keys.sorted() == [0, 2])
+        #expect(view.ribbonLayer.sublayers?.count == 2)
         let first = try #require(view.lineLayers[0])
         let third = try #require(view.lineLayers[2])
         #expect(first.string as? String == "first")
@@ -147,6 +149,293 @@ struct LyricsRibbonViewTests {
         view.lyrics = nil
         #expect(view.lineLayers.isEmpty)
         #expect(view.ribbonLayer.sublayers?.isEmpty ?? true)
+    }
+
+    // A hundred lines of two seconds each, every tenth one an interlude.
+    private let longTrack = TrackInfo(id: "spotify:track:long", title: "Long", artist: "Artist", duration: 300)
+    private let longLyrics = SyncedLyrics(
+        lines: (0..<100).map { index -> LyricLine in
+            let text = index % 10 == 9 ? " " : "line number \(index) of the song"
+            return LyricLine(time: TimeInterval(index) * 2 + 2, text: text)
+        })
+
+    private func longState(position: TimeInterval, at date: Date, playing: Bool = true) -> PlaybackState {
+        PlaybackState(track: longTrack, isPlaying: playing, syncedPosition: position, syncedAt: date)
+    }
+
+    private func attached(_ view: LyricsRibbonView) -> Set<Int> {
+        Set(view.lineLayers.keys)
+    }
+
+    /// The lines in the viewport when the ribbon is scrolled to `offset`.
+    private func visible(_ view: LyricsRibbonView, offset: CGFloat) throws -> Set<Int> {
+        let ribbon = try #require(view.ribbon)
+        return Set(ribbon.lines(in: ribbon.viewport(offset: offset, width: view.bounds.width)))
+    }
+
+    private func visible(_ view: LyricsRibbonView, at date: Date) throws -> Set<Int> {
+        try visible(view, offset: view.offset(at: date))
+    }
+
+    @Test func onlyTheLinesAroundTheViewportAreAttached() throws {
+        let view = LyricsRibbonView(frame: NSRect(x: 0, y: 0, width: 200, height: 22))
+        let now = Date()
+        view.playback = longState(position: 100, at: now)
+        view.lyrics = longLyrics
+
+        let inView = try visible(view, at: now)
+        #expect(!inView.isEmpty)
+        #expect(inView.isSubset(of: attached(view)))
+        #expect(view.lineLayers.count < 10)
+        #expect(view.ribbonLayer.sublayers?.count == view.lineLayers.count)
+
+        view.lyrics = nil
+        #expect(view.lineLayers.isEmpty)
+        #expect(view.ribbonLayer.sublayers?.isEmpty ?? true)
+    }
+
+    @Test func linesComingIntoViewWithinTheHorizonAreAttached() throws {
+        let view = LyricsRibbonView(frame: NSRect(x: 0, y: 0, width: 200, height: 22))
+        let now = Date()
+        view.lyrics = longLyrics
+        // Across lines and an interlude.
+        for position in stride(from: TimeInterval(90), to: 104, by: 0.7) {
+            view.playback = longState(position: position, at: now)
+            view.updateAttachedLines(now: now)
+
+            for step in stride(from: 0, through: LyricsRibbonView.attachHorizon, by: 0.05) {
+                let inView = try visible(view, at: now.addingTimeInterval(step))
+                #expect(inView.isSubset(of: attached(view)), "\(step) s after \(position) s")
+            }
+            #expect(view.lineLayers.count < 10)
+        }
+    }
+
+    @Test func pausedRibbonAttachesOnlyWhatIsInView() throws {
+        let view = LyricsRibbonView(frame: NSRect(x: 0, y: 0, width: 200, height: 22))
+        let now = Date()
+        view.lyrics = longLyrics
+        view.playback = longState(position: 100, at: now, playing: false)
+
+        let ribbon = try #require(view.ribbon)
+        let viewport = ribbon.viewport(offset: view.offset(at: now), width: 200)
+        let margin = LyricsRibbonView.attachMargin
+        let around = ribbon.lines(in: (viewport.lowerBound - margin)...(viewport.upperBound + margin))
+        #expect(attached(view) == Set(around))
+        #expect(try visible(view, at: now).isSubset(of: attached(view)))
+
+        // Nothing moves, however late the next update is.
+        view.updateAttachedLines(now: now.addingTimeInterval(60))
+        #expect(attached(view) == Set(around))
+    }
+
+    @Test func farSeekAttachesTheNewPlaceWithoutTheLinesInBetween() throws {
+        let view = LyricsRibbonView(frame: NSRect(x: 0, y: 0, width: 200, height: 22))
+        let now = Date()
+        view.lyrics = longLyrics
+        view.playback = longState(position: 40, at: now)
+        let before = try visible(view, at: now)
+        let shownX = view.ribbonLayer.position.x
+
+        view.playback = longState(position: 160, at: now)
+        let after = try visible(view, at: now)
+        #expect(before.isDisjoint(with: after))
+        #expect(after.isSubset(of: attached(view)))
+        #expect(view.lineLayers.count < 10)
+
+        // Until the next commit the ribbon is still on screen where it was.
+        view.updateAttachedLines(now: now, shownX: shownX)
+        #expect(before.isSubset(of: attached(view)))
+        #expect(after.isSubset(of: attached(view)))
+        #expect(view.lineLayers.count < 20)
+        #expect(attached(view).isDisjoint(with: 30..<70))
+
+        // The next refresh finds the ribbon at the new place only.
+        view.refreshSnapshots(now: now)
+        #expect(attached(view).isDisjoint(with: before))
+        #expect(after.isSubset(of: attached(view)))
+    }
+
+    // A correction glides over everything between the two places.
+    @Test func linesPassedWhileSettlingAreAttached() throws {
+        let view = LyricsRibbonView(frame: NSRect(x: 0, y: 0, width: 40, height: 22))
+        let now = Date()
+        view.lyrics = longLyrics
+        view.playback = longState(position: 100, at: now, playing: false)
+        let offset = view.offset(at: now)
+        let modelX = view.ribbonLayer.position.x
+
+        for delta in [LyricsRibbonView.maxSettleDistance, -LyricsRibbonView.maxSettleDistance] {
+            view.updateAttachedLines(now: now, shownX: modelX + delta)
+            for step in stride(from: CGFloat(0), through: 1, by: 0.05) {
+                let inView = try visible(view, offset: offset - delta * step)
+                #expect(inView.isSubset(of: attached(view)), "\(delta) pt, \(step) of the way")
+            }
+        }
+    }
+
+    // A glide from ahead is added to the scrolling, so it can end up past the end of the horizon.
+    @Test func glideFromAheadReachesPastTheHorizon() throws {
+        let view = LyricsRibbonView(frame: NSRect(x: 0, y: 0, width: 200, height: 22))
+        let now = Date()
+        view.lyrics = longLyrics
+        // Short of the limit: the view rests at its own, slightly later, idea of now.
+        let ahead = LyricsRibbonView.maxSettleDistance - 2
+        for position in stride(from: TimeInterval(100), to: 104, by: 0.25) {
+            view.playback = longState(position: position, at: now)
+            view.updateAttachedLines(now: now, shownX: view.ribbonLayer.position.x - ahead)
+            let end = view.offset(at: now.addingTimeInterval(LyricsRibbonView.attachHorizon))
+            #expect(try visible(view, offset: end + ahead).isSubset(of: attached(view)), "at \(position) s")
+        }
+    }
+
+    // While scrolling in a window a new playback refreshes no snapshots, and still attaches.
+    @Test func seekWhileScrollingAttachesWithoutRefreshingTheSnapshots() throws {
+        let view = LyricsRibbonView(frame: NSRect(x: 0, y: 0, width: 200, height: 22))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 200, height: 22), styleMask: [.borderless],
+            backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        window.contentView?.addSubview(view)
+        view.lyrics = longLyrics
+        let now = Date()
+        view.playback = longState(position: 40, at: now)
+        let refreshes = view.snapshotRefreshes
+
+        view.playback = longState(position: 160, at: now)
+        #expect(view.snapshotRefreshes == refreshes)
+        for step in stride(from: 0.1, through: LyricsRibbonView.attachHorizon, by: 0.1) {
+            let inView = try visible(view, at: now.addingTimeInterval(step))
+            #expect(inView.isSubset(of: attached(view)), "after \(step) s")
+        }
+        // The lines the snapshots show stay too, but nothing in between.
+        #expect(view.lineLayers.count < 20)
+        #expect(attached(view).isDisjoint(with: 30..<70))
+    }
+
+    @Test func refreshingTheSnapshotsMovesTheAttachedLinesAlong() throws {
+        let view = LyricsRibbonView(frame: NSRect(x: 0, y: 0, width: 200, height: 22))
+        let now = Date()
+        view.lyrics = longLyrics
+        view.playback = longState(position: 100, at: now)
+        let before = try visible(view, at: now)
+        #expect(before.isSubset(of: attached(view)))
+        let refreshes = view.snapshotRefreshes
+
+        let later = now.addingTimeInterval(20)
+        view.refreshSnapshots(now: later)
+        let after = try visible(view, at: later)
+        #expect(after.isSubset(of: attached(view)))
+        #expect(attached(view).isDisjoint(with: before))
+        #expect(view.lineLayers.count < 10)
+        #expect(view.ribbonLayer.sublayers?.count == view.lineLayers.count)
+        #expect(view.snapshotRefreshes == refreshes + 1)
+    }
+
+    @Test func newlyAttachedLinesGetTheirColorPlaceAndScale() throws {
+        let view = LyricsRibbonView(frame: NSRect(x: 0, y: 0, width: 200, height: 22))
+        let now = Date()
+        view.lyrics = longLyrics
+        view.playback = longState(position: 100, at: now)
+        let ribbon = try #require(view.ribbon)
+        let later = now.addingTimeInterval(20)
+        let current = try #require(try visible(view, at: later).min())
+        #expect(view.lineLayers[current] == nil)
+
+        // Not attached yet, so there is nothing to color.
+        view.currentIndex = current
+        view.updateAttachedLines(now: later)
+
+        let color = BarTextLayer.labelColor(for: view)
+        #expect(view.lineLayers.count > 1)
+        for (index, layer) in view.lineLayers {
+            #expect(layer.string as? String == longLyrics.lines[index].text)
+            #expect(layer.position.x == ribbon.origins[index])
+            #expect(layer.position.y == ((22 - layer.bounds.height) / 2).rounded())
+            #expect(layer.bounds.width == ribbon.widths[index])
+            #expect(layer.contentsScale == BarTextLayer.scale(for: view))
+            #expect(layer.foregroundColor == (index == current ? color : BarTextLayer.dimmed(color)))
+            #expect(layer.superlayer === view.ribbonLayer)
+        }
+        #expect(view.lineLayers[current] != nil)
+
+        // The highlight moves among the attached lines, and ignores the other ones.
+        let next = try #require(view.lineLayers.keys.filter { $0 != current }.min())
+        view.currentIndex = next
+        #expect(view.lineLayers[current]?.foregroundColor == BarTextLayer.dimmed(color))
+        #expect(view.lineLayers[next]?.foregroundColor == color)
+        view.currentIndex = 0
+        #expect(view.lineLayers[0] == nil)
+        #expect(view.lineLayers[next]?.foregroundColor == BarTextLayer.dimmed(color))
+    }
+
+    @Test func resizingLaysOutTheAttachedLines() throws {
+        let view = LyricsRibbonView(frame: NSRect(x: 0, y: 0, width: 200, height: 22))
+        let now = Date()
+        view.lyrics = longLyrics
+        view.playback = longState(position: 100, at: now, playing: false)
+        let narrow = attached(view)
+
+        view.setFrameSize(NSSize(width: 600, height: 30))
+        #expect(try visible(view, at: now).isSubset(of: attached(view)))
+        #expect(attached(view).count > narrow.count)
+        for layer in view.lineLayers.values {
+            #expect(layer.position.y == ((30 - layer.bounds.height) / 2).rounded())
+        }
+    }
+
+    // An invalidation makes AppKit snapshot the status bar button some nine times.
+    @Test func attachingLinesDoesNotRefreshTheSnapshots() throws {
+        let view = LyricsRibbonView(frame: NSRect(x: 0, y: 0, width: 200, height: 22))
+        let now = Date()
+        view.lyrics = longLyrics
+        view.playback = longState(position: 100, at: now)
+        let before = attached(view)
+        let refreshes = view.snapshotRefreshes
+
+        let later = now.addingTimeInterval(20)
+        view.updateAttachedLines(now: later)
+        #expect(attached(view) != before)
+        #expect(try visible(view, at: later).isSubset(of: attached(view)))
+        // The snapshots still show the ribbon where it was, so those lines stay.
+        #expect(try visible(view, at: now).isSubset(of: attached(view)))
+        #expect(view.snapshotRefreshes == refreshes)
+    }
+
+    // The ribbon waits where the snapshot had it and glides from there.
+    @Test func spaceChangeKeepsTheLinesOfTheSnapshotAttached() throws {
+        let view = LyricsRibbonView(frame: NSRect(x: 0, y: 0, width: 200, height: 22))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 200, height: 22), styleMask: [.borderless],
+            backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        window.contentView?.addSubview(view)
+        view.lyrics = longLyrics
+        let now = Date()
+        view.playback = longState(position: 100, at: now)
+        let snapshotOffset = 200 * LyricsRibbon.anchorShare - view.ribbonLayer.position.x
+        let refreshes = view.snapshotRefreshes
+
+        // A refresh was held back, so the snapshot is a few lines old.
+        let change = now.addingTimeInterval(8)
+        view.activeSpaceDidChange(now: change)
+        #expect(view.snapshotRefreshes == refreshes)
+        #expect(try visible(view, offset: snapshotOffset).isSubset(of: attached(view)))
+        let glide = view.offset(at: change) - snapshotOffset
+        for step in stride(from: CGFloat(0), through: 1, by: 0.02) {
+            let inView = try visible(view, offset: snapshotOffset + glide * step)
+            #expect(inView.isSubset(of: attached(view)), "\(step) of the way")
+        }
+        for step in stride(from: 0, through: LyricsRibbonView.attachHorizon, by: 0.05) {
+            let inView = try visible(view, at: change.addingTimeInterval(step))
+            #expect(inView.isSubset(of: attached(view)), "after \(step) s")
+        }
+
+        // Once the glide is over the lines behind go.
+        let after = change.addingTimeInterval(
+            LyricsRibbonView.spaceFreezeDuration + LyricsRibbonView.spaceSettleDuration)
+        view.refreshSnapshots(now: after)
+        #expect(try attached(view).isDisjoint(with: visible(view, offset: snapshotOffset)))
     }
 
     @Test func animatesOnlyWhilePlayingWithLyrics() {
@@ -285,6 +574,7 @@ struct LyricsRibbonViewTests {
         let view = LyricsRibbonView(frame: NSRect(x: 0, y: 0, width: 200, height: 22))
         view.appearance = NSAppearance(named: .darkAqua)
         view.lyrics = lyrics
+        view.playback = state(playing: false, position: 20)
         view.currentIndex = 2
         await mainQueueTurn()
         let third = try #require(view.lineLayers[2])

@@ -7,6 +7,9 @@ import AppKit
 /// animation over the whole track scrolls that layer, so the scrolling does not depend on the main
 /// thread. A slow timer only refreshes the snapshots AppKit keeps of the status bar button, which it
 /// shows while switching Spaces; they are rendered from the model position, not from the animation.
+///
+/// Only the lines that can come into view before the next refresh have a layer: every snapshot walks
+/// all the layers of the ribbon, the clipped ones too.
 @MainActor
 final class LyricsRibbonView: NSView {
     var lyrics: SyncedLyrics? {
@@ -44,12 +47,20 @@ final class LyricsRibbonView: NSView {
     static let spaceFreezeDuration: TimeInterval = 0.5
     /// A snapshot replaced while it is shown is one more jump.
     static let snapshotHoldAfterSpaceChange: TimeInterval = 0.5
+    static let attachSlack: TimeInterval = 1
+    /// How far ahead lines are attached: the longest the next refresh can be away, which is one held
+    /// back by a Space change, and the slack for a late timer.
+    static let attachHorizon: TimeInterval =
+        snapshotInterval + spaceFreezeDuration + snapshotHoldAfterSpaceChange + attachSlack
+    /// Around the viewport, for the rounding of the position.
+    static let attachMargin: CGFloat = 24
 
     private(set) var ribbon: LyricsRibbon?
     // Internal so tests can check the scrolling and the highlight.
     let ribbonLayer = CALayer()
-    /// One per line; nil for interludes.
-    private(set) var lineLayers: [CATextLayer?] = []
+    /// The attached lines by their index. Interludes are never attached.
+    private(set) var lineLayers: [Int: CATextLayer] = [:]
+    private var textSizes: [CGSize] = []
     // Internal for tests: `needsDisplay` cannot be reset in a window that is never shown.
     private(set) var snapshotRefreshes = 0
     /// Where the snapshots show the ribbon.
@@ -141,6 +152,7 @@ final class LyricsRibbonView: NSView {
         snapshotHoldUntil = now.addingTimeInterval(Self.spaceFreezeDuration + Self.snapshotHoldAfterSpaceChange)
         spaceChange = (at: now, x: snapshotX)
         addSpaceChangeAnimations(now: now)
+        updateAttachedLines(now: now)
         let hold = snapshotHoldUntil
         DispatchQueue.main.asyncAfter(deadline: .now() + hold.timeIntervalSince(now)) { [weak self] in
             MainActor.assumeIsolated {
@@ -198,40 +210,101 @@ final class LyricsRibbonView: NSView {
     }
 
     private func rebuild() {
-        lineLayers.forEach { $0?.removeFromSuperlayer() }
+        BarTextLayer.withoutActions {
+            lineLayers.values.forEach { $0.removeFromSuperlayer() }
+        }
+        lineLayers = [:]
         if let lyrics {
-            let sizes = lyrics.lines.map { line -> CGSize in
+            textSizes = lyrics.lines.map { line -> CGSize in
                 // Interludes take no room besides the gap.
                 guard !line.text.allSatisfy(\.isWhitespace) else { return .zero }
                 return NSAttributedString(string: line.text, attributes: [.font: MarqueeTextView.font]).size()
             }
-            ribbon = LyricsRibbon(lines: lyrics.lines, widths: sizes.map { ceil($0.width) })
-            lineLayers = zip(lyrics.lines, sizes).map { line, size in
-                guard size.width > 0 else { return nil }
-                let layer = BarTextLayer.make()
-                BarTextLayer.setText(line.text, size: size, on: layer)
-                ribbonLayer.addSublayer(layer)
-                return layer
-            }
+            ribbon = LyricsRibbon(lines: lyrics.lines, widths: textSizes.map { ceil($0.width) })
         } else {
+            textSizes = []
             ribbon = nil
-            lineLayers = []
         }
         textColor = nil
-        updateScale()
         updateColors()
-        layoutLines()
         updateScrolling()
         refreshSnapshots(now: Date())
+    }
+
+    /// Attaches the lines that can be in view before the next update and drops the other ones.
+    /// `shownX` is where the ribbon is on screen, for when the animations were just replaced.
+    /// Sublayers coming and going do not invalidate the view, so this costs no snapshots.
+    func updateAttachedLines(now: Date, shownX: CGFloat? = nil) {
+        guard let ribbon else { return }
+        var wanted = Set<Int>()
+        for stretch in attachedStretches(of: ribbon, now: now, shownX: shownX) {
+            wanted.formUnion(ribbon.lines(in: stretch))
+        }
+        guard wanted != Set(lineLayers.keys) else { return }
+
+        let scale = BarTextLayer.scale(for: self)
+        let dimmed = textColor.map(BarTextLayer.dimmed)
+        BarTextLayer.withoutActions {
+            for (index, layer) in lineLayers where !wanted.contains(index) {
+                layer.removeFromSuperlayer()
+                lineLayers[index] = nil
+            }
+            for index in wanted where lineLayers[index] == nil {
+                let layer = BarTextLayer.make()
+                BarTextLayer.setText(ribbon.lines[index].text, size: textSizes[index], on: layer)
+                layer.contentsScale = scale
+                layer.foregroundColor = index == currentIndex ? textColor : dimmed
+                layer.position = linePosition(index, of: layer, in: ribbon)
+                ribbonLayer.addSublayer(layer)
+                lineLayers[index] = layer
+            }
+        }
+    }
+
+    /// In ribbon x. The scrolling over the horizon, the model position the snapshots are rendered
+    /// from, and the position on screen: part of the scrolling while the ribbon glides from there,
+    /// a stretch of its own after a seek, so that the lines in between stay off.
+    private func attachedStretches(
+        of ribbon: LyricsRibbon, now: Date, shownX: CGFloat?
+    ) -> [ClosedRange<CGFloat>] {
+        let from = offset(at: now)
+        var low = from
+        var high = max(from, offset(at: now.addingTimeInterval(Self.attachHorizon)))
+        var offsets = [anchorX - ribbonLayer.position.x]
+
+        var glidingFrom: CGFloat?
+        let spaceChangeEnd = spaceChange?.at.addingTimeInterval(Self.spaceFreezeDuration + Self.spaceSettleDuration)
+        if let spaceChange, let spaceChangeEnd, now < spaceChangeEnd {
+            glidingFrom = anchorX - spaceChange.x
+        } else if let shownX = shownX ?? ribbonLayer.presentation()?.position.x {
+            if abs(shownX - positionX(at: now)) <= Self.maxSettleDistance {
+                glidingFrom = anchorX - shownX
+            } else {
+                offsets.append(anchorX - shownX)
+            }
+        }
+        if let glidingFrom {
+            low = min(low, glidingFrom)
+            // A glide from ahead is added to the scrolling, so it reaches past the end of it.
+            high += max(0, glidingFrom - from)
+        }
+
+        return ([(low, high)] + offsets.map { ($0, $0) }).map { low, high in
+            let lower = ribbon.viewport(offset: low, width: bounds.width).lowerBound - Self.attachMargin
+            let upper = ribbon.viewport(offset: high, width: bounds.width).upperBound + Self.attachMargin
+            return lower...upper
+        }
+    }
+
+    private func linePosition(_ index: Int, of layer: CALayer, in ribbon: LyricsRibbon) -> CGPoint {
+        CGPoint(x: ribbon.origins[index], y: ((bounds.height - layer.bounds.height) / 2).rounded())
     }
 
     private func layoutLines() {
         guard let ribbon else { return }
         BarTextLayer.withoutActions {
-            for (index, layer) in lineLayers.enumerated() {
-                guard let layer else { continue }
-                layer.position = CGPoint(
-                    x: ribbon.origins[index], y: ((bounds.height - layer.bounds.height) / 2).rounded())
+            for (index, layer) in lineLayers {
+                layer.position = linePosition(index, of: layer, in: ribbon)
             }
         }
     }
@@ -242,7 +315,7 @@ final class LyricsRibbonView: NSView {
         guard let textColor else { return }
         let dimmed = BarTextLayer.dimmed(textColor)
         BarTextLayer.withoutActions {
-            for case let index? in indices where lineLayers.indices.contains(index) {
+            for case let index? in indices {
                 lineLayers[index]?.foregroundColor = index == currentIndex ? textColor : dimmed
             }
         }
@@ -254,14 +327,14 @@ final class LyricsRibbonView: NSView {
         let color = BarTextLayer.labelColor(for: self)
         guard color != textColor else { return false }
         textColor = color
-        updateColors(of: Array(lineLayers.indices))
+        updateColors(of: Array(lineLayers.keys))
         return true
     }
 
     private func updateScale() {
         let scale = BarTextLayer.scale(for: self)
         BarTextLayer.withoutActions {
-            lineLayers.forEach { $0?.contentsScale = scale }
+            lineLayers.values.forEach { $0.contentsScale = scale }
         }
     }
 
@@ -282,13 +355,13 @@ final class LyricsRibbonView: NSView {
                 ribbonLayer.add(animation, forKey: Self.scrollAnimationKey)
             }
             if !wasScrolling {
-                refreshSnapshots(now: now)
+                refreshSnapshots(now: now, shownX: shownX)
             }
         } else {
             updatePosition(now: now)
             // Nothing refreshes the snapshots while the ribbon rests.
             if wasScrolling || ribbonLayer.position != oldPosition {
-                refreshSnapshots(now: now)
+                refreshSnapshots(now: now, shownX: shownX)
             }
         }
         if let spaceChange, now < spaceChange.at.addingTimeInterval(Self.spaceFreezeDuration) {
@@ -296,6 +369,7 @@ final class LyricsRibbonView: NSView {
         } else if let shownX, let animation = settleAnimation(from: shownX - positionX(at: now)) {
             ribbonLayer.add(animation, forKey: Self.settleAnimationKey)
         }
+        updateAttachedLines(now: now, shownX: shownX)
     }
 
     /// A pause arrives late, so the ribbon has scrolled past the position it reports; resyncs are a
@@ -314,10 +388,11 @@ final class LyricsRibbonView: NSView {
     }
 
     /// A snapshot is shown at some time during the interval it is valid for, so while scrolling it
-    /// aims at the middle: that halves how far off it can be.
-    private func refreshSnapshots(now: Date) {
+    /// aims at the middle: that halves how far off it can be. Internal for tests.
+    func refreshSnapshots(now: Date, shownX: CGFloat? = nil) {
         updatePosition(now: isAnimating ? now.addingTimeInterval(Self.snapshotInterval / 2) : now)
         snapshotX = ribbonLayer.position.x
+        updateAttachedLines(now: now, shownX: shownX)
         snapshotRefreshes += 1
         needsDisplay = true
     }
@@ -327,8 +402,13 @@ final class LyricsRibbonView: NSView {
         if shouldRun, timer == nil {
             let timer = Timer(timeInterval: Self.snapshotInterval, repeats: true) { [weak self] timer in
                 let alive = MainActor.assumeIsolated {
-                    if let self, Date() >= self.snapshotHoldUntil {
-                        self.refreshSnapshots(now: Date())
+                    if let self {
+                        let now = Date()
+                        if now >= self.snapshotHoldUntil {
+                            self.refreshSnapshots(now: now)
+                        } else {
+                            self.updateAttachedLines(now: now)
+                        }
                     }
                     return self != nil
                 }
