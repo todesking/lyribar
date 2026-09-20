@@ -401,4 +401,113 @@ struct LyricsResolverTests {
         resolver.resolve(track: nil)
         await gate.release()
     }
+
+    @Test func retryPrefersTheCache() async {
+        let cache = makeCache()
+        defer { remove(cache) }
+        cache.set(trackA, lyrics: lyricsA, source: "lrclib")
+        let provider = RecordingProvider(.found(lyricsB), source: "spotify")
+        let resolver = LyricsResolver(provider: provider, cache: cache)
+
+        resolver.resolve(track: trackA)
+        resolver.retry()
+
+        #expect(resolver.status.foundLines == lyricsA.lines)
+        #expect(resolver.status.foundSource == "lrclib")
+        #expect(resolver.fetchTask == nil)
+        #expect(await provider.requested.isEmpty)
+    }
+
+    @Test func refetchReplacesTheCachedLyrics() async {
+        let cache = makeCache()
+        defer { remove(cache) }
+        cache.set(trackA, lyrics: lyricsA, source: "lrclib")
+        let provider = RecordingProvider(.found(lyricsB), source: "spotify")
+        let resolver = LyricsResolver(provider: provider, cache: cache)
+
+        resolver.resolve(track: trackA)
+        resolver.refetch()
+        await resolver.fetchTask?.value
+
+        #expect(resolver.status.foundLines == lyricsB.lines)
+        #expect(resolver.status.foundSource == "spotify")
+        #expect(cache.get(trackA)?.lyrics.lines == lyricsB.lines)
+        #expect(cache.get(trackA)?.source == "spotify")
+        #expect(await provider.requested == ["a"])
+    }
+
+    // The bar must not go blank while the new lyrics are on their way.
+    @Test func refetchKeepsTheCachedLyricsWhileFetching() async {
+        let cache = makeCache()
+        defer { remove(cache) }
+        cache.set(trackA, lyrics: lyricsA, source: "lrclib")
+        let provider = GatedProvider()
+        let resolver = LyricsResolver(provider: provider, cache: cache)
+
+        resolver.resolve(track: trackA)
+        resolver.refetch()
+        #expect(await provider.waitForRequest("a"))
+        #expect(resolver.status.foundLines == lyricsA.lines)
+        #expect(resolver.status.foundSource == "lrclib")
+
+        await provider.complete("a", with: lyricsB, source: "spotify")
+        await resolver.fetchTask?.value
+
+        #expect(resolver.status.foundLines == lyricsB.lines)
+        #expect(resolver.status.foundSource == "spotify")
+    }
+
+    @Test func refetchMissKeepsTheCachedLyrics() async {
+        let cache = makeCache()
+        defer { remove(cache) }
+        cache.set(trackA, lyrics: lyricsA, source: "lrclib")
+        let resolver = LyricsResolver(provider: RecordingProvider(.missing), cache: cache)
+
+        resolver.resolve(track: trackA)
+        resolver.refetch()
+        await resolver.fetchTask?.value
+
+        #expect(resolver.status.foundLines == lyricsA.lines)
+        #expect(resolver.status.foundSource == "lrclib")
+        #expect(cache.get(trackA)?.lyrics.lines == lyricsA.lines)
+    }
+
+    @Test func refetchFailureKeepsTheCachedLyrics() async {
+        let cache = makeCache()
+        defer { remove(cache) }
+        cache.set(trackA, lyrics: lyricsA, source: "lrclib")
+        let provider = RecordingProvider(.failing)
+        let resolver = LyricsResolver(provider: provider, cache: cache, sleep: instantSleep)
+
+        resolver.resolve(track: trackA)
+        resolver.refetch()
+        await resolver.fetchTask?.value
+
+        #expect(resolver.status.foundLines == lyricsA.lines)
+        #expect(cache.get(trackA)?.lyrics.lines == lyricsA.lines)
+        // No automatic retry is scheduled: there is nothing broken on screen to recover from.
+        #expect(resolver.retryTask == nil)
+        for _ in 0..<50 { await Task.yield() }
+        #expect(await provider.requested == ["a"])
+    }
+
+    // Without a cached entry there is nothing to bypass, so this is the plain retry path.
+    @Test func refetchWithoutCacheLoadsLikeRetry() async {
+        let cache = makeCache()
+        defer { remove(cache) }
+        let provider = RecordingProvider([.missing, .found(lyricsA)], source: "spotify")
+        let resolver = LyricsResolver(provider: provider, cache: cache)
+
+        resolver.resolve(track: trackA)
+        await resolver.fetchTask?.value
+        #expect(resolver.status.isNotFound)
+
+        resolver.refetch()
+        #expect(resolver.status.isLoading)
+        await resolver.fetchTask?.value
+
+        #expect(resolver.status.foundLines == lyricsA.lines)
+        #expect(resolver.status.foundSource == "spotify")
+        #expect(await provider.requested == ["a", "a"])
+    }
 }

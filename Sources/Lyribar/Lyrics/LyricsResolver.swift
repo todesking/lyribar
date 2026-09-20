@@ -62,26 +62,37 @@ final class LyricsResolver {
         start(track)
     }
 
-    private func start(_ track: TrackInfo) {
-        if let cached = cache.get(track) {
+    /// Fetches the current track again without reading the cache, and keeps the cached lyrics
+    /// showing until a new result arrives. Used when the conditions of a fetch change, such as a
+    /// Spotify cookie being saved or removed.
+    func refetch() {
+        guard let track else { return }
+        cancelFetch()
+        start(track, bypassCache: true)
+    }
+
+    private func start(_ track: TrackInfo, bypassCache: Bool = false) {
+        let cached = cache.get(track)
+        if let cached {
             status = .found(cached.lyrics, source: cached.source)
-            return
+            if !bypassCache { return }
+        } else {
+            status = .loading
         }
-        status = .loading
         fetchTask = Task { [provider, cache] in
             do {
                 let fetched = try await provider.fetch(track)
                 guard !Task.isCancelled, track.isSameTrack(as: self.track) else { return }
                 guard let fetched else {
-                    // A miss is not cached in v1.
-                    status = .notFound
+                    // A miss is not cached in v1, and it does not drop lyrics already shown.
+                    if cached == nil { status = .notFound }
                     return
                 }
                 cache.set(track, lyrics: fetched.lyrics, source: fetched.source)
                 status = .found(fetched.lyrics, source: fetched.source)
             } catch {
                 guard !Task.isCancelled, !(error is CancellationError),
-                    track.isSameTrack(as: self.track)
+                    track.isSameTrack(as: self.track), cached == nil
                 else { return }
                 status = .failed(error)
                 scheduleRetry(for: track)
