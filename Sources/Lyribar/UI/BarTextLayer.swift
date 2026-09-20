@@ -4,6 +4,8 @@ import AppKit
 /// status bar button: on every invalidation AppKit snapshots the whole button again, several times.
 @MainActor
 enum BarTextLayer {
+    static let dimmedAlpha: CGFloat = 0.7
+
     static func make() -> CATextLayer {
         let layer = CATextLayer()
         let font = MarqueeTextView.font
@@ -25,6 +27,19 @@ enum BarTextLayer {
             color = NSColor.labelColor.cgColor
         }
         return color
+    }
+
+    static func dimmed(_ color: CGColor) -> CGColor {
+        color.copy(alpha: color.alpha * dimmedAlpha) ?? color
+    }
+
+    /// For every snapshot of the status bar button AppKit swaps the appearance of the views and puts
+    /// it back. Following that redraws every text layer twice per snapshot, so views read the color
+    /// on the next turn of the run loop, when the appearance is back.
+    static func afterAppearanceSettled(_ work: @escaping @MainActor () -> Void) {
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated { work() }
+        }
     }
 
     static func scale(for view: NSView) -> CGFloat {

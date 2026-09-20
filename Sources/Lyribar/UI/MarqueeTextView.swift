@@ -45,6 +45,7 @@ final class MarqueeTextView: NSView {
     private var textSize: CGSize = .zero
     private var startedAt = Date()
     private var timer: Timer?
+    private var colorUpdatePending = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -86,7 +87,15 @@ final class MarqueeTextView: NSView {
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
-        updateColor()
+        guard !colorUpdatePending else { return }
+        colorUpdatePending = true
+        BarTextLayer.afterAppearanceSettled { [weak self] in
+            guard let self else { return }
+            colorUpdatePending = false
+            if updateColor() {
+                needsDisplay = true
+            }
+        }
     }
 
     func updatePosition(now: Date) {
@@ -102,12 +111,15 @@ final class MarqueeTextView: NSView {
         }
     }
 
-    private func updateColor() {
+    /// Whether the color changed.
+    @discardableResult
+    private func updateColor() -> Bool {
         let color = BarTextLayer.labelColor(for: self)
-        guard color != textLayer.foregroundColor else { return }
+        guard color != textLayer.foregroundColor else { return false }
         BarTextLayer.withoutActions {
             textLayer.foregroundColor = color
         }
+        return true
     }
 
     private func updateScale() {

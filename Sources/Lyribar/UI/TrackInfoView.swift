@@ -47,7 +47,7 @@ final class TrackInfoView: NSView {
         let attributes: [NSAttributedString.Key: Any] = [
             .font: MarqueeTextView.font,
             // Drawn by hand, `secondaryLabelColor` is too dark to read on the menu bar.
-            .foregroundColor: NSColor.labelColor.withAlphaComponent(CGFloat(LyricsRibbonView.dimmedAlpha)),
+            .foregroundColor: NSColor.labelColor.withAlphaComponent(BarTextLayer.dimmedAlpha),
             .paragraphStyle: paragraph,
         ]
         let rect = NSRect(

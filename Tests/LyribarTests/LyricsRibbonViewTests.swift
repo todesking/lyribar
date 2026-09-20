@@ -102,8 +102,15 @@ struct LyricsRibbonViewTests {
         let third = try #require(view.lineLayers[2])
         #expect(first.string as? String == "first")
         #expect(third.position.x == ribbon.origins[2])
-        #expect(first.opacity == LyricsRibbonView.dimmedAlpha)
-        #expect(third.opacity == 1)
+        // Dimmed by the color: an opacity makes every snapshot composite the layer offscreen.
+        let color = try #require(third.foregroundColor)
+        #expect(first.foregroundColor == BarTextLayer.dimmed(color))
+        #expect(color.alpha > BarTextLayer.dimmed(color).alpha)
+        #expect(first.opacity == 1)
+
+        view.currentIndex = 0
+        #expect(first.foregroundColor == color)
+        #expect(third.foregroundColor == BarTextLayer.dimmed(color))
 
         view.lyrics = nil
         #expect(view.lineLayers.isEmpty)
@@ -239,5 +246,37 @@ struct LyricsRibbonViewTests {
         let view = LyricsRibbonView(frame: NSRect(x: 0, y: 0, width: 200, height: 22))
         #expect(view.hitTest(NSPoint(x: 10, y: 10)) == nil)
         #expect(view.clipsToBounds)
+    }
+
+    // AppKit swaps the appearance and puts it back for every snapshot of the status bar button.
+    @Test func appearanceSwappedAndPutBackLeavesTheLayersAlone() async throws {
+        let view = LyricsRibbonView(frame: NSRect(x: 0, y: 0, width: 200, height: 22))
+        view.appearance = NSAppearance(named: .darkAqua)
+        view.lyrics = lyrics
+        view.currentIndex = 2
+        await mainQueueTurn()
+        let third = try #require(view.lineLayers[2])
+        let dark = try #require(third.foregroundColor)
+        let refreshes = view.snapshotRefreshes
+
+        view.appearance = NSAppearance(named: .aqua)
+        view.appearance = NSAppearance(named: .darkAqua)
+        #expect(third.foregroundColor == dark)
+        await mainQueueTurn()
+        #expect(third.foregroundColor == dark)
+        #expect(view.snapshotRefreshes == refreshes)
+
+        view.appearance = NSAppearance(named: .aqua)
+        #expect(third.foregroundColor == dark)
+        await mainQueueTurn()
+        #expect(third.foregroundColor != dark)
+        #expect(view.lineLayers[0]?.foregroundColor == third.foregroundColor.map(BarTextLayer.dimmed))
+        #expect(view.snapshotRefreshes == refreshes + 1)
+    }
+
+    private func mainQueueTurn() async {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
     }
 }

@@ -20,7 +20,7 @@ final class LyricsRibbonView: NSView {
         didSet {
             guard currentIndex != oldValue else { return }
             // No `needsDisplay`: the snapshots it triggers would stall the scrolling on every line.
-            updateHighlight()
+            updateColors(of: [oldValue, currentIndex])
         }
     }
 
@@ -31,7 +31,6 @@ final class LyricsRibbonView: NSView {
         }
     }
 
-    static let dimmedAlpha: Float = 0.7
     /// Every refresh blocks the main thread for some 10 ms, and the snapshots are rarely visible.
     static let snapshotInterval: TimeInterval = 1
     static let scrollAnimationKey = "scroll"
@@ -58,6 +57,7 @@ final class LyricsRibbonView: NSView {
     private var snapshotHoldUntil = Date.distantPast
     private var spaceChange: (at: Date, x: CGFloat)?
     private var textColor: CGColor?
+    private var colorUpdatePending = false
     private var timer: Timer?
 
     /// Whether the ribbon moves by itself; while it does not, it only moves on changes.
@@ -106,7 +106,15 @@ final class LyricsRibbonView: NSView {
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
-        updateColors()
+        guard !colorUpdatePending else { return }
+        colorUpdatePending = true
+        BarTextLayer.afterAppearanceSettled { [weak self] in
+            guard let self else { return }
+            colorUpdatePending = false
+            if updateColors() {
+                refreshSnapshots(now: Date())
+            }
+        }
     }
 
     func offset(at now: Date) -> CGFloat {
@@ -208,7 +216,6 @@ final class LyricsRibbonView: NSView {
         textColor = nil
         updateScale()
         updateColors()
-        updateHighlight()
         layoutLines()
         updateScrolling()
         refreshSnapshots(now: Date())
@@ -225,21 +232,26 @@ final class LyricsRibbonView: NSView {
         }
     }
 
-    private func updateHighlight() {
+    /// The lines are dimmed by their color: a layer with an `opacity` is composited through an
+    /// offscreen buffer in every snapshot, even when it is scrolled out of sight.
+    private func updateColors(of indices: [Int?]) {
+        guard let textColor else { return }
+        let dimmed = BarTextLayer.dimmed(textColor)
         BarTextLayer.withoutActions {
-            for (index, layer) in lineLayers.enumerated() {
-                layer?.opacity = index == currentIndex ? 1 : Self.dimmedAlpha
+            for case let index? in indices where lineLayers.indices.contains(index) {
+                lineLayers[index]?.foregroundColor = index == currentIndex ? textColor : dimmed
             }
         }
     }
 
-    private func updateColors() {
+    /// Whether the color changed.
+    @discardableResult
+    private func updateColors() -> Bool {
         let color = BarTextLayer.labelColor(for: self)
-        guard color != textColor else { return }
+        guard color != textColor else { return false }
         textColor = color
-        BarTextLayer.withoutActions {
-            lineLayers.forEach { $0?.foregroundColor = color }
-        }
+        updateColors(of: Array(lineLayers.indices))
+        return true
     }
 
     private func updateScale() {
