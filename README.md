@@ -180,6 +180,10 @@ Scripts/generate-icon.sh          # redraw Resources/AppIcon.icns
 
 The version comes from `CFBundleShortVersionString` in `Resources/Info.plist`.
 
+A debug build keeps the Spotify cookie in a Keychain item of its own
+(`com.todesking.lyribar.debug`), so it neither sees nor asks for the cookie saved
+by the release build.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

@@ -19,7 +19,13 @@ struct KeychainError: Error, Equatable, LocalizedError {
 /// The login keychain. `kSecUseDataProtectionKeychain` is deliberately not set: it needs a
 /// keychain-access-groups entitlement, which ad-hoc signed builds cannot carry.
 struct KeychainSpotifyCredentialStore: SpotifyCredentialStore {
-    static let defaultService = "com.todesking.lyribar"
+    // Debug builds keep their own item: the release build's item would prompt for access on
+    // every launch, since its ACL only trusts the release signature.
+    #if DEBUG
+        static let defaultService = "com.todesking.lyribar.debug"
+    #else
+        static let defaultService = "com.todesking.lyribar"
+    #endif
     static let defaultAccount = "spotify-sp_dc"
 
     private let service: String
@@ -76,7 +82,7 @@ struct KeychainSpotifyCredentialStore: SpotifyCredentialStore {
     }
 }
 
-/// For tests and `swift run`, which must not touch the real keychain.
+/// For tests, which must not touch the real keychain.
 final class InMemorySpotifyCredentialStore: SpotifyCredentialStore {
     private let stored: Mutex<String?>
 
