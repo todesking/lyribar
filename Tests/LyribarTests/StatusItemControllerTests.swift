@@ -27,6 +27,11 @@ private final class Recorder {
     var opened = 0
 }
 
+/// A provider that never has lyrics, for tests that only need the resolver to reach the cache.
+private struct NoLyricsProvider: LyricsProvider {
+    func fetch(_ track: TrackInfo) async throws -> FetchedLyrics? { nil }
+}
+
 @MainActor
 struct StatusItemControllerTests {
     private func makeController(
@@ -40,7 +45,7 @@ struct StatusItemControllerTests {
         let scheduler = ManualScheduler()
         let controller = StatusItemController(
             monitor: PlaybackMonitor(),
-            resolver: resolver ?? LyricsResolver(provider: LRCLibProvider(), cache: cache),
+            resolver: resolver ?? LyricsResolver(provider: NoLyricsProvider(), cache: cache),
             settings: settings,
             schedule: { work in scheduler.enqueue(work) })
         return (controller, settings, scheduler, { defaults.removePersistentDomain(forName: suite) })
@@ -244,7 +249,7 @@ struct StatusItemControllerTests {
         let cache = LyricsCache(directory: directory)
         let track = TrackInfo(id: "spotify:track:abc", title: "Song", artist: "Artist", duration: 200)
         cache.set(track, lyrics: SyncedLyrics(lines: [LyricLine(time: 0, text: "line")]), source: "lrclib")
-        let resolver = LyricsResolver(provider: LRCLibProvider(), cache: cache)
+        let resolver = LyricsResolver(provider: NoLyricsProvider(), cache: cache)
         let (controller, _, scheduler, cleanup) = makeController(resolver: resolver)
         defer {
             cleanup()
