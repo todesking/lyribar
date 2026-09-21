@@ -66,6 +66,9 @@ private final class FakeActivationService: ActivationService {
     var frontmost: FakeApp?
     private(set) var frontmostQueries = 0
     private(set) var hideCount = 0
+    /// Never reaches NSApplication: switching the real policy would put the test process in the
+    /// Dock. The order matters, so the calls are kept as a list.
+    private(set) var policies: [NSApplication.ActivationPolicy] = []
 
     func frontmostApplication() -> (any ActivatableApp)? {
         frontmostQueries += 1
@@ -74,6 +77,10 @@ private final class FakeActivationService: ActivationService {
 
     func hideSelf() {
         hideCount += 1
+    }
+
+    func setActivationPolicy(_ policy: NSApplication.ActivationPolicy) {
+        policies.append(policy)
     }
 }
 
