@@ -61,8 +61,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         Task { await spotify.refresh() }
     }
 
-    /// Remembers the app whose focus `show()` is about to take. Split out of `show()` for the same
-    /// reason as `prepareWindow()`: tests can then drive the hand-off without a window on screen.
+    /// Remembers the app whose focus `show()` is about to take, and turns the app regular for as
+    /// long as the window is up. Split out of `show()` for the same reason as `prepareWindow()`:
+    /// tests can then drive the hand-off without a window on screen.
     func rememberFocusOwner() {
         // Opening the menu again while the window is already up must not overwrite the app we owe
         // focus to -- by then the frontmost app may well be this one.
@@ -71,6 +72,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let frontmost = activation.frontmostApplication()
         // Focus coming from Lyribar itself is nothing to give back; hiding on close is better.
         appToRestore = frontmost?.isCurrentApp == true ? nil : frontmost
+        // An accessory app never owns the menu bar, even while it is active. Coming back from
+        // another Space with this window active then left the menu bar owned by an app on the
+        // Space we just left, and the whole bar disappeared. A regular app owns the bar itself.
+        // The Dock icon that comes with it lasts only as long as the window.
+        activation.setActivationPolicy(.regular)
     }
 
     /// Lyribar is an accessory app, so staying active once its only window is gone would leave the
@@ -82,6 +88,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         isOpen = false
         let app = appToRestore
         appToRestore = nil
+        // Back to accessory once the window is gone, which also takes the Dock icon away. It runs
+        // after the hand-off below -- both of its paths return -- so focus leaves first.
+        defer { activation.setActivationPolicy(.accessory) }
         // The app may be gone by now, and the system may refuse the hand-off anyway. Hiding is the
         // fallback that always works, because the system then picks the next app itself.
         if let app, !app.isTerminated, app.activate() { return }
