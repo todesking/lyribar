@@ -2,6 +2,7 @@ import CryptoKit
 import Foundation
 
 struct CacheEntry: Codable {
+    let trackID: String
     let artist: String
     let title: String
     let duration: TimeInterval
@@ -37,7 +38,7 @@ struct LyricsCache: Sendable {
 
     func set(_ track: TrackInfo, lyrics: SyncedLyrics, source: String, fetchedAt: Date = Date()) {
         let entry = CacheEntry(
-            artist: track.artist, title: track.title, duration: track.duration,
+            trackID: track.id, artist: track.artist, title: track.title, duration: track.duration,
             source: source, fetchedAt: fetchedAt, lines: lyrics.lines)
         guard let data = try? Self.encoder.encode(entry) else { return }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -67,11 +68,11 @@ struct LyricsCache: Sendable {
         directory.appending(path: Self.key(for: track) + ".json", directoryHint: .notDirectory)
     }
 
-    // Seconds are rounded to an integer, so the provisional and settled durations Spotify reports
-    // for the same track usually land on the same key.
+    // Keyed by track id, not by artist/title/duration: those can collide across distinct tracks
+    // (explicit/clean, re-recordings, different languages), and Spotify's provisional duration
+    // right after a track change would otherwise split one track across two keys.
     static func key(for track: TrackInfo) -> String {
-        let raw = "\(track.artist)\u{1}\(track.title)\u{1}\(Int(track.duration.rounded()))"
-        return SHA256.hash(data: Data(raw.utf8)).map { String(format: "%02x", $0) }.joined()
+        SHA256.hash(data: Data(track.id.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     private static let encoder: JSONEncoder = {

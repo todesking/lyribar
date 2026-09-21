@@ -79,6 +79,7 @@ struct LyricsCacheTests {
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             let entry = try decoder.decode(CacheEntry.self, from: data)
+            #expect(entry.trackID == track.id)
             #expect(entry.artist == track.artist)
             #expect(entry.title == track.title)
             #expect(entry.duration == track.duration)
@@ -88,30 +89,32 @@ struct LyricsCacheTests {
         }
     }
 
-    // Spotify reports a provisional duration right after a track change (222.0 then 222.027).
-    @Test func keyRoundsDurationToSeconds() {
+    // Spotify reports a provisional duration right after a track change; the key must not
+    // depend on it, since it settles to a slightly different value for the same track.
+    @Test func keyIsSameForSameIdDespiteDurationDrift() throws {
+        var provisional = track
+        provisional.duration = 221.4
         var settled = track
-        settled.duration = 222.027
-        #expect(LyricsCache.key(for: settled) == LyricsCache.key(for: track))
+        settled.duration = 221.6
+        #expect(LyricsCache.key(for: provisional) == LyricsCache.key(for: settled))
+        #expect(LyricsCache.key(for: provisional).count == 64)
+
+        try withCache { cache in
+            cache.set(provisional, lyrics: lyrics, source: LRCLibProvider.source)
+            #expect(cache.get(settled)?.lyrics.lines == lyrics.lines)
+        }
     }
 
-    @Test func keyDependsOnArtistTitleAndDuration() {
-        var longer = track
-        longer.duration = 223.6
-        var otherTitle = track
-        otherTitle.title = "Other Song"
-        var otherArtist = track
-        otherArtist.artist = "Other Artist"
-        let keys = Set([track, longer, otherTitle, otherArtist].map(LyricsCache.key(for:)))
-        #expect(keys.count == 4)
-        #expect(LyricsCache.key(for: track).count == 64)
-    }
+    // Same artist/title/duration but a different id (e.g. explicit vs. clean, a re-recording)
+    // must not share a cache entry.
+    @Test func keyDiffersForDifferentIdDespiteSameArtistTitleDuration() throws {
+        var otherID = track
+        otherID.id = "spotify:track:other"
+        #expect(LyricsCache.key(for: otherID) != LyricsCache.key(for: track))
 
-    // The separator keeps "A\u{1}B" from colliding with "AB".
-    @Test func keySeparatorAvoidsFieldCollisions() {
-        var shifted = track
-        shifted.artist = track.artist + track.title
-        shifted.title = ""
-        #expect(LyricsCache.key(for: shifted) != LyricsCache.key(for: track))
+        try withCache { cache in
+            cache.set(track, lyrics: lyrics, source: LRCLibProvider.source)
+            #expect(cache.get(otherID) == nil)
+        }
     }
 }
