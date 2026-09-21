@@ -21,6 +21,11 @@ the project uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
   splits one track's lyrics across two cache entries. The cache is rebuilt as
   tracks are looked up again; existing cache files are unused going forward but
   are still cleaned up by "Clear lyrics cache".
+- LRCLIB's search fallback now only considers results whose duration is close
+  to the playing track's, picking the closest match. It used to take the first
+  result with synced lyrics regardless of duration, so a Live, Remix, or
+  Extended version that missed the exact match could pull a mistimed original
+  version's lyrics from search and cache them.
 
 ## 0.2.0 - 2026-09-21
 
