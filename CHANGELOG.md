@@ -15,6 +15,12 @@ the project uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
   for instance when Automation for Spotify is denied or the Apple Event times
   out, and it stayed that way until the next track change. It now keeps what it
   knows and tries again a second later; Spotify quitting still empties the bar.
+- The lyrics cache is keyed by track id instead of artist, title, and duration,
+  so tracks that share those (explicit/clean, re-recordings) no longer collide
+  and Spotify's provisional duration right after a track change no longer
+  splits one track's lyrics across two cache entries. The cache is rebuilt as
+  tracks are looked up again; existing cache files are unused going forward but
+  are still cleaned up by "Clear lyrics cache".
 
 ## 0.2.0 - 2026-09-21
 
