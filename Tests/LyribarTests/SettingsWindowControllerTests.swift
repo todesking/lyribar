@@ -1,21 +1,51 @@
 import AppKit
 import Foundation
+import Synchronization
 import SwiftUI
 import Testing
 
 @testable import Lyribar
 
-/// Never touches SMAppService: these tests must not change the user's login items.
+/// Never touches SMAppService: these tests must not change the user's login items. Reads are
+/// counted, since asking the system is what syncing the login item state amounts to.
 @MainActor
-private struct NoopLaunchAtLoginService: LaunchAtLoginService {
-    var isEnabled: Bool { false }
+private final class CountingLaunchAtLoginService: LaunchAtLoginService {
+    private(set) var enabledReads = 0
+
+    var isEnabled: Bool {
+        enabledReads += 1
+        return false
+    }
+
     func register() throws {}
     func unregister() throws {}
 }
 
-/// Never reaches Spotify: the settings view checks the stored cookie when it appears.
-private struct NoopTokenVerifier: SpotifyTokenVerifying {
-    func token() async throws -> String { "token" }
+/// Never reaches Spotify: the window controller checks the stored cookie when the window opens.
+private final class CountingTokenVerifier: SpotifyTokenVerifying {
+    private let count = Mutex(0)
+
+    var calls: Int { count.withLock { $0 } }
+
+    func token() async throws -> String {
+        count.withLock { $0 += 1 }
+        return "token"
+    }
+}
+
+/// Polls rather than counting yields: a busy machine only makes the wait longer.
+@MainActor
+private func waitUntil(_ condition: () -> Bool) async -> Bool {
+    let deadline = ContinuousClock.now + .seconds(5)
+    while ContinuousClock.now < deadline {
+        if condition() { return true }
+        try? await Task.sleep(for: .milliseconds(1))
+    }
+    return false
+}
+
+private func makeCache() -> LyricsCache {
+    LyricsCache(directory: URL.temporaryDirectory.appending(path: "lyribar-settings-\(UUID().uuidString)"))
 }
 
 @MainActor
@@ -50,21 +80,30 @@ private final class FakeActivationService: ActivationService {
 @MainActor
 struct SettingsWindowControllerTests {
     private func makeController(
-        activation: any ActivationService = FakeActivationService()
+        activation: any ActivationService = FakeActivationService(),
+        cache: LyricsCache? = nil,
+        launchAtLogin: any LaunchAtLoginService = CountingLaunchAtLoginService(),
+        spotify: SpotifyAccountController? = nil
     ) -> (SettingsWindowController, () -> Void) {
         let suite = "LyribarTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         let settings = Settings(defaults: defaults)
-        let cache = LyricsCache(
-            directory: URL.temporaryDirectory.appending(path: "lyribar-settings-\(UUID().uuidString)"))
+        let cache = cache ?? makeCache()
         let controller = SettingsWindowController(
             settings: settings,
-            launchAtLogin: LaunchAtLoginController(settings: settings, service: NoopLaunchAtLoginService()),
-            spotify: SpotifyAccountController(
-                credentials: InMemorySpotifyCredentialStore(), verifier: NoopTokenVerifier()),
+            launchAtLogin: LaunchAtLoginController(settings: settings, service: launchAtLogin),
+            spotify: spotify
+                ?? SpotifyAccountController(
+                    credentials: InMemorySpotifyCredentialStore(), verifier: CountingTokenVerifier()),
             cache: cache,
             activation: activation)
-        return (controller, { defaults.removePersistentDomain(forName: suite) })
+        return (
+            controller,
+            {
+                defaults.removePersistentDomain(forName: suite)
+                try? FileManager.default.removeItem(at: cache.directory)
+            }
+        )
     }
 
     @Test func windowIsTitledClosableAndFixedSize() {
@@ -216,5 +255,78 @@ struct SettingsWindowControllerTests {
         #expect(previous.activateCount == 1)
         #expect(later.activateCount == 1)
         #expect(activation.hideCount == 0)
+    }
+
+    private let track = TrackInfo(
+        id: "spotify:track:abc", title: "Song Name", artist: "The Artist", duration: 222.0)
+    private let otherTrack = TrackInfo(
+        id: "spotify:track:xyz", title: "Other Song", artist: "Nobody", duration: 100.0)
+    private let lyrics = SyncedLyrics(lines: [LyricLine(time: 1, text: "First")])
+
+    /// The window keeps the view it was built with, so what it shows is synced by the controller.
+    /// `show()` would activate the test process, so the two halves of it are driven separately.
+    @Test func refreshingPicksUpCacheGrowth() {
+        let cache = makeCache()
+        let (controller, cleanup) = makeController(cache: cache)
+        defer { cleanup() }
+
+        controller.prepareWindow()
+        controller.refreshContents()
+        #expect(controller.cacheUsage.bytes == 0)
+
+        cache.set(track, lyrics: lyrics, source: LRCLibProvider.source)
+        controller.refreshContents()
+
+        #expect(controller.cacheUsage.bytes > 0)
+        #expect(controller.cacheUsage.bytes == cache.totalSize())
+    }
+
+    /// Reopening the window after more tracks played must not show the size from the first open.
+    @Test func everyRefreshShowsTheLatestCacheSize() {
+        let cache = makeCache()
+        let (controller, cleanup) = makeController(cache: cache)
+        defer { cleanup() }
+
+        controller.prepareWindow()
+        cache.set(track, lyrics: lyrics, source: LRCLibProvider.source)
+        controller.refreshContents()
+        let afterFirstOpen = controller.cacheUsage.bytes
+        #expect(afterFirstOpen > 0)
+
+        cache.set(otherTrack, lyrics: lyrics, source: LRCLibProvider.source)
+        controller.refreshContents()
+
+        #expect(controller.cacheUsage.bytes > afterFirstOpen)
+        #expect(controller.cacheUsage.bytes == cache.totalSize())
+    }
+
+    /// The login item can be removed in System Settings while the window is closed.
+    @Test func refreshingAsksTheSystemAboutTheLoginItem() {
+        let service = CountingLaunchAtLoginService()
+        let (controller, cleanup) = makeController(launchAtLogin: service)
+        defer { cleanup() }
+
+        controller.prepareWindow()
+        controller.refreshContents()
+        #expect(service.enabledReads == 1)
+
+        controller.refreshContents()
+
+        #expect(service.enabledReads == 2)
+    }
+
+    /// The stored cookie can expire while the window is closed, so it is checked again on open.
+    @Test func refreshingRechecksTheSpotifyCookie() async {
+        let verifier = CountingTokenVerifier()
+        let spotify = SpotifyAccountController(
+            credentials: InMemorySpotifyCredentialStore(cookie: "abc"), verifier: verifier)
+        let (controller, cleanup) = makeController(spotify: spotify)
+        defer { cleanup() }
+
+        controller.prepareWindow()
+        controller.refreshContents()
+
+        #expect(await waitUntil { spotify.state == .connected })
+        #expect(verifier.calls == 1)
     }
 }

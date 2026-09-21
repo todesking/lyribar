@@ -30,6 +30,12 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     func show() {
         let window = prepareWindow()
+        // The window and its hosting controller are reused, so the view's own lifecycle runs only
+        // once; what it shows is synced here instead, before rememberFocusOwner() flips isOpen.
+        // Reopening a closed window resyncs; bringing an open one back to the front does not.
+        if !isOpen {
+            refreshContents()
+        }
         rememberFocusOwner()
         // An accessory app is never active, and an inactive app's window opens behind the others.
         // orderFrontRegardless() puts the window on screen even while the app is still inactive;
@@ -42,6 +48,17 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         window.orderFrontRegardless()
         NSApplication.shared.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+    }
+
+    /// Everything on display that can go stale while the window is closed: the login item can be
+    /// removed in System Settings, the cache grows as tracks play, and the Spotify cookie expires.
+    /// Split out of `show()` so tests can drive it without a window on screen.
+    func refreshContents() {
+        launchAtLogin.syncFromSystem()
+        cacheUsage.refresh()
+        // Reading the cookie is a Keychain access, which is why this is tied to opening the window
+        // rather than to the window becoming key: a repeated prompt would otherwise be possible.
+        Task { await spotify.refresh() }
     }
 
     /// Remembers the app whose focus `show()` is about to take. Split out of `show()` for the same

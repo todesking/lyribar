@@ -109,11 +109,6 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .frame(width: Self.width)
-        .onAppear {
-            launchAtLogin.syncFromSystem()
-            cacheUsage.refresh()
-            Task { await spotify.refresh() }
-        }
     }
 
     static func canSaveSpotifyCookie(_ input: String) -> Bool {
