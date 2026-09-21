@@ -1,5 +1,14 @@
 import AppKit
 
+/// The outcome of one AppleScript snapshot. `.failed` is kept apart from `.notRunning` so that a
+/// script error (Apple Event timeout, Automation denied, unexpected output) does not look like
+/// "Spotify is gone" to the caller.
+enum SpotifySnapshot: Equatable, Sendable {
+    case state(PlaybackState)
+    case notRunning
+    case failed
+}
+
 // NSAppleScript is not Sendable; it is only touched from `queue`.
 final class SpotifyScript: @unchecked Sendable {
     static let bundleIdentifier = "com.spotify.client"
@@ -22,7 +31,7 @@ final class SpotifyScript: @unchecked Sendable {
         NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier == bundleIdentifier }
     }
 
-    func snapshot() async -> PlaybackState? {
+    func snapshot() async -> SpotifySnapshot {
         await withCheckedContinuation { continuation in
             queue.async {
                 continuation.resume(returning: self.run())
@@ -30,18 +39,19 @@ final class SpotifyScript: @unchecked Sendable {
         }
     }
 
-    private func run() -> PlaybackState? {
+    private func run() -> SpotifySnapshot {
         // Sending an Apple Event to Spotify would launch it, so never do that unless it is running.
-        guard Self.isSpotifyRunning else { return nil }
+        guard Self.isSpotifyRunning else { return .notRunning }
         if script == nil {
             let compiled = NSAppleScript(source: Self.source)
             var error: NSDictionary?
-            guard let compiled, compiled.compileAndReturnError(&error) else { return nil }
+            guard let compiled, compiled.compileAndReturnError(&error) else { return .failed }
             script = compiled
         }
         var error: NSDictionary?
-        guard let output = script?.executeAndReturnError(&error).stringValue, error == nil else { return nil }
-        return Self.parse(output, now: Date())
+        guard let output = script?.executeAndReturnError(&error).stringValue, error == nil else { return .failed }
+        guard let state = Self.parse(output, now: Date()) else { return .failed }
+        return .state(state)
     }
 
     static func parse(_ output: String, now: Date) -> PlaybackState? {
