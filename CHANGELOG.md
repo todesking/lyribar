@@ -10,6 +10,11 @@ the project uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 - Opening the settings from another desktop (Space) than the one they were last
   closed on now shows the window on the current desktop, instead of switching
   back to the old one.
+- A failing read of the playback state no longer clears the lyrics. The app used
+  to fall back to "Not playing" whenever the AppleScript it resyncs with failed,
+  for instance when Automation for Spotify is denied or the Apple Event times
+  out, and it stayed that way until the next track change. It now keeps what it
+  knows and tries again a second later; Spotify quitting still empties the bar.
 
 ## 0.2.0 - 2026-09-21
 
