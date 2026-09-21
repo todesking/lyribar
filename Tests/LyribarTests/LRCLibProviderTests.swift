@@ -96,6 +96,7 @@ struct LRCLibProviderTests {
     }
 
     @Test func getMissFallsBackToSearch() async throws {
+        // track.duration is 222.6; "Second" is within tolerance, "Third" is 40s off.
         let (provider, stub) = provider { request in
             if request.url?.path == "/api/get" {
                 return (404, self.trackNotFound)
@@ -104,9 +105,9 @@ struct LRCLibProviderTests {
                 200,
                 self.body(
                     #"""
-                    [{"syncedLyrics":null,"plainLyrics":"No timing"},
-                     {"syncedLyrics":"[00:05.00]Second"},
-                     {"syncedLyrics":"[00:07.00]Third"}]
+                    [{"syncedLyrics":null,"plainLyrics":"No timing","duration":222},
+                     {"syncedLyrics":"[00:05.00]Second","duration":222},
+                     {"syncedLyrics":"[00:07.00]Third","duration":262}]
                     """#)
             )
         }
@@ -137,7 +138,69 @@ struct LRCLibProviderTests {
     @Test func searchWithoutAnySyncedLyricsReturnsNil() async throws {
         let (provider, _) = provider { request in
             if request.url?.path == "/api/get" { return (404, self.trackNotFound) }
-            return (200, self.body(#"[{"syncedLyrics":null},{"plainLyrics":"No timing"}]"#))
+            return (
+                200,
+                self.body(#"[{"syncedLyrics":null,"duration":222},{"plainLyrics":"No timing"}]"#))
+        }
+
+        #expect(try await provider.fetch(track) == nil)
+    }
+
+    @Test func searchWithOnlyFarDurationReturnsNil() async throws {
+        // track.duration is 222.6; this record is 40s off, well past the 3s tolerance.
+        let (provider, _) = provider { request in
+            if request.url?.path == "/api/get" { return (404, self.trackNotFound) }
+            return (
+                200,
+                self.body(#"[{"syncedLyrics":"[00:05.00]Wrong version","duration":262.6}]"#))
+        }
+
+        #expect(try await provider.fetch(track) == nil)
+    }
+
+    @Test func searchPicksClosestDurationRegardlessOfOrder() async throws {
+        // track.duration is 222.6; both are within tolerance, but 223 is closer than 221.
+        let (provider, _) = provider { request in
+            if request.url?.path == "/api/get" { return (404, self.trackNotFound) }
+            return (
+                200,
+                self.body(
+                    #"""
+                    [{"syncedLyrics":"[00:07.00]Farther","duration":221},
+                     {"syncedLyrics":"[00:05.00]Closer","duration":223}]
+                    """#)
+            )
+        }
+
+        let fetched = try await provider.fetch(track)
+
+        #expect(fetched?.lyrics.lines == [LyricLine(time: 5, text: "Closer")])
+    }
+
+    @Test func searchSkipsClosestRecordWhenItFailsToParse() async throws {
+        // track.duration is 222.6; the closest record's syncedLyrics is unparsable, so the
+        // next-closest one should be used instead.
+        let (provider, _) = provider { request in
+            if request.url?.path == "/api/get" { return (404, self.trackNotFound) }
+            return (
+                200,
+                self.body(
+                    #"""
+                    [{"syncedLyrics":"not an LRC file","duration":223},
+                     {"syncedLyrics":"[00:05.00]Second closest","duration":220}]
+                    """#)
+            )
+        }
+
+        let fetched = try await provider.fetch(track)
+
+        #expect(fetched?.lyrics.lines == [LyricLine(time: 5, text: "Second closest")])
+    }
+
+    @Test func searchIgnoresRecordsWithoutDuration() async throws {
+        let (provider, _) = provider { request in
+            if request.url?.path == "/api/get" { return (404, self.trackNotFound) }
+            return (200, self.body(#"[{"syncedLyrics":"[00:05.00]No duration field"}]"#))
         }
 
         #expect(try await provider.fetch(track) == nil)
@@ -198,7 +261,7 @@ struct LRCLibProviderTests {
         let (provider, stub) = provider(retryPolicy: .default) { request in
             if request.url?.path == "/api/get" { return (404, self.trackNotFound) }
             if attempts.next() == 1 { return (503, self.serverOverloaded) }
-            return (200, self.body(#"[{"syncedLyrics":"[00:05.00]Second"}]"#))
+            return (200, self.body(#"[{"syncedLyrics":"[00:05.00]Second","duration":222}]"#))
         }
 
         let fetched = try await provider.fetch(track)
