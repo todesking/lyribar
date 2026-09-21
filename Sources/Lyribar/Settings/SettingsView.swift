@@ -31,9 +31,8 @@ struct SettingsView: View {
     @Bindable var settings: Settings
     let launchAtLogin: LaunchAtLoginController
     let spotify: SpotifyAccountController
-    let cache: LyricsCache
+    let cacheUsage: LyricsCacheUsage
 
-    @State private var cacheSize = 0
     @State private var spotifyCookie = ""
 
     var body: some View {
@@ -94,12 +93,9 @@ struct SettingsView: View {
 
             Section {
                 HStack {
-                    Button("Clear lyrics cache") {
-                        cache.clear()
-                        cacheSize = cache.totalSize()
-                    }
+                    Button("Clear lyrics cache") { cacheUsage.clear() }
                     Spacer()
-                    Text(cacheSizeText(bytes: cacheSize))
+                    Text(cacheSizeText(bytes: cacheUsage.bytes))
                         .foregroundStyle(.secondary)
                 }
             }
@@ -113,11 +109,6 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .frame(width: Self.width)
-        .onAppear {
-            launchAtLogin.syncFromSystem()
-            cacheSize = cache.totalSize()
-            Task { await spotify.refresh() }
-        }
     }
 
     static func canSaveSpotifyCookie(_ input: String) -> Bool {

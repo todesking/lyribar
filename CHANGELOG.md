@@ -10,6 +10,11 @@ the project uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 - Opening the settings from another desktop (Space) than the one they were last
   closed on now shows the window on the current desktop, instead of switching
   back to the old one.
+- The settings window now refreshes what it shows every time it is opened.
+  The lyrics cache size, the "Launch at login" toggle, and the Spotify
+  connection state used to be read once per run, so a cache that had grown, a
+  login item removed in System Settings, or an expired cookie only showed up
+  after restarting the app.
 - A failing read of the playback state no longer clears the lyrics. The app used
   to fall back to "Not playing" whenever the AppleScript it resyncs with failed,
   for instance when Automation for Spotify is denied or the Apple Event times
