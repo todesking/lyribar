@@ -9,7 +9,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let settings: Settings
     private let launchAtLogin: LaunchAtLoginController
     private let spotify: SpotifyAccountController
-    private let cache: LyricsCache
+    let cacheUsage: LyricsCacheUsage
     private let activation: any ActivationService
     private var isOpen = false
     /// Who had focus when the window opened; it gets focus back when the window closes.
@@ -24,7 +24,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         self.settings = settings
         self.launchAtLogin = launchAtLogin
         self.spotify = spotify
-        self.cache = cache
+        cacheUsage = LyricsCacheUsage(cache: cache)
         self.activation = activation
     }
 
@@ -77,7 +77,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         if let window { return window }
         let hosting = NSHostingController(
             rootView: SettingsView(
-                settings: settings, launchAtLogin: launchAtLogin, spotify: spotify, cache: cache))
+                settings: settings, launchAtLogin: launchAtLogin, spotify: spotify,
+                cacheUsage: cacheUsage))
         hosting.sizingOptions = [.preferredContentSize]
         let window = NSWindow(contentViewController: hosting)
         window.title = Self.title
