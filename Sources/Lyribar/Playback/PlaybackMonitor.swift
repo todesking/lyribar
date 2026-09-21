@@ -9,11 +9,17 @@ import Observation
 final class PlaybackMonitor {
     private(set) var state: PlaybackState = .empty()
 
-    @ObservationIgnored private let script = SpotifyScript()
+    @ObservationIgnored private let snapshot: @Sendable () async -> SpotifySnapshot
     @ObservationIgnored private var observers: [(NotificationCenter, NSObjectProtocol)] = []
-    @ObservationIgnored private var resyncTask: Task<Void, Never>?
+    // Exposed so tests can see whether the periodic resync is running.
+    @ObservationIgnored private(set) var resyncTask: Task<Void, Never>?
     // Bumped on every state change so that a snapshot started earlier is not applied over newer data.
     @ObservationIgnored private var generation = 0
+
+    init(snapshot: (@Sendable () async -> SpotifySnapshot)? = nil) {
+        let script = SpotifyScript()
+        self.snapshot = snapshot ?? { await script.snapshot() }
+    }
 
     func start() {
         guard observers.isEmpty else { return }
@@ -64,9 +70,20 @@ final class PlaybackMonitor {
     private func resync() {
         let expected = generation
         Task {
-            let snapshot = await script.snapshot()
+            let result = await snapshot()
             guard expected == generation else { return }
-            apply(snapshot ?? .empty())
+            apply(result)
+        }
+    }
+
+    /// A failed snapshot leaves the state and the resync loop alone: the script fails while Spotify
+    /// keeps playing (Apple Event timeout, Automation denied), and dropping the track there would
+    /// clear the lyrics. Spotify quitting is covered by the workspace notification instead.
+    private func apply(_ snapshot: SpotifySnapshot) {
+        switch snapshot {
+        case .state(let newState): apply(newState)
+        case .notRunning: apply(.empty())
+        case .failed: break
         }
     }
 
@@ -93,10 +110,11 @@ final class PlaybackMonitor {
         }
     }
 
-    private func periodicResync() async {
+    // Not private so that tests can drive one round without waiting for the timer.
+    func periodicResync() async {
         let expected = generation
-        let snapshot = await script.snapshot()
+        let result = await snapshot()
         guard !Task.isCancelled, expected == generation else { return }
-        apply(snapshot ?? .empty())
+        apply(result)
     }
 }
