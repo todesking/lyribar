@@ -53,6 +53,39 @@ struct LRCParserTests {
         #expect(abs(time - 12.345) < 0.0001)
     }
 
+    @Test func timestampWithoutFraction() throws {
+        let result = LRCParser.parse("[01:23]Hello")
+        let time = try #require(result?.lines.first?.time)
+        #expect(abs(time - 83.0) < 0.0001)
+        #expect(result?.lines.first?.text == "Hello")
+    }
+
+    @Test func oneDigitFraction() throws {
+        let result = LRCParser.parse("[01:23.4]Hello")
+        let time = try #require(result?.lines.first?.time)
+        #expect(abs(time - 83.4) < 0.0001)
+    }
+
+    @Test func fractionDigitsMayBeMixed() throws {
+        let result = try #require(
+            LRCParser.parse("[01:23]None\n[01:23.4]One\n[01:23.45]Two\n[01:23.456]Three"))
+        #expect(result.lines.map(\.text) == ["None", "One", "Two", "Three"])
+        let expected = [83.0, 83.4, 83.45, 83.456]
+        #expect(zip(result.lines.map(\.time), expected).allSatisfy { abs($0 - $1) < 0.0001 })
+    }
+
+    // The minutes must be digits, which is what keeps metadata out.
+    @Test func lengthTagIsIgnored() {
+        #expect(LRCParser.parse("[length:03:45]") == nil)
+        #expect(LRCParser.parse("[length:03:45]\n[01:23]Hello")?.lines.count == 1)
+    }
+
+    @Test func malformedFractionIsRejected() {
+        #expect(LRCParser.parse("[01:23.]Hello") == nil)
+        #expect(LRCParser.parse("[01:23.4567]Hello") == nil)
+        #expect(LRCParser.parse("[01:2]Hello") == nil)
+    }
+
     @Test func emptyStringReturnsNil() {
         #expect(LRCParser.parse("") == nil)
     }
