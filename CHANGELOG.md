@@ -7,6 +7,10 @@ the project uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The menu bar no longer disappears when the settings window becomes active
+  after a switch back from another desktop (Space). Lyribar now appears in the
+  Dock and in the left half of the menu bar, with an app menu of its own, for
+  as long as the settings window is open; both go away when it closes.
 - Opening the settings from another desktop (Space) than the one they were last
   closed on now shows the window on the current desktop, instead of switching
   back to the old one.

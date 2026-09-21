@@ -2,9 +2,9 @@
 
 Lyribar is a macOS menu bar app that shows the lyrics of the song playing in the
 Spotify desktop app, one line at a time, in sync with the playback position. It
-lives in the status bar: no Dock icon, no window other than its settings. Lyrics
-come from [LRCLIB](https://lrclib.net), so there is no account and no API key to
-set up. Optionally, Lyribar can also fetch the lyrics Spotify itself shows; see
+lives in the status bar: no Dock icon unless its settings are open, and no
+window other than those settings. Lyrics come from [LRCLIB](https://lrclib.net),
+so there is no account and no API key to set up. Optionally, Lyribar can also fetch the lyrics Spotify itself shows; see
 [Spotify lyrics](#spotify-lyrics-optional-unofficial).
 
 ![lyribar screen recording](docs/lyribar_screen.gif)
@@ -78,7 +78,9 @@ Clicking anywhere on the status item opens the menu:
 - **Clear lyrics cache** — deletes the cached lyrics; the current size is shown
   next to the button.
 
-The settings window closes with the close button or ⌘W.
+The settings window closes with the close button or ⌘W. While it is open,
+Lyribar appears in the Dock and in the left half of the menu bar; both go away
+again when the window closes.
 
 ## Spotify lyrics (optional, unofficial)
 

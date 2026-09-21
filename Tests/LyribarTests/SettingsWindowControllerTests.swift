@@ -66,6 +66,9 @@ private final class FakeActivationService: ActivationService {
     var frontmost: FakeApp?
     private(set) var frontmostQueries = 0
     private(set) var hideCount = 0
+    /// Never reaches NSApplication: switching the real policy would put the test process in the
+    /// Dock. The order matters, so the calls are kept as a list.
+    private(set) var policies: [NSApplication.ActivationPolicy] = []
 
     func frontmostApplication() -> (any ActivatableApp)? {
         frontmostQueries += 1
@@ -74,6 +77,10 @@ private final class FakeActivationService: ActivationService {
 
     func hideSelf() {
         hideCount += 1
+    }
+
+    func setActivationPolicy(_ policy: NSApplication.ActivationPolicy) {
+        policies.append(policy)
     }
 }
 
@@ -255,6 +262,74 @@ struct SettingsWindowControllerTests {
         #expect(previous.activateCount == 1)
         #expect(later.activateCount == 1)
         #expect(activation.hideCount == 0)
+    }
+
+    /// An accessory app owns no menu bar, which made the bar vanish when the window became active
+    /// again after a Space switch, so the app is regular for as long as the window is open.
+    @Test func openingTurnsTheAppRegular() {
+        let activation = FakeActivationService()
+        activation.frontmost = FakeApp()
+        let (controller, cleanup) = makeController(activation: activation)
+        defer { cleanup() }
+
+        controller.prepareWindow()
+        controller.rememberFocusOwner()
+
+        #expect(activation.policies == [.regular])
+    }
+
+    @Test func openingTheMenuAgainDoesNotSwitchThePolicyAgain() {
+        let activation = FakeActivationService()
+        activation.frontmost = FakeApp()
+        let (controller, cleanup) = makeController(activation: activation)
+        defer { cleanup() }
+
+        controller.prepareWindow()
+        controller.rememberFocusOwner()
+        controller.rememberFocusOwner()
+
+        #expect(activation.policies == [.regular])
+    }
+
+    @Test func closingGoesBackToAccessory() {
+        let activation = FakeActivationService()
+        activation.frontmost = FakeApp()
+        let (controller, cleanup) = makeController(activation: activation)
+        defer { cleanup() }
+
+        openAndClose(controller)
+
+        #expect(activation.policies == [.regular, .accessory])
+    }
+
+    /// The hand-off returns early when it succeeds, so the switch back has to outlive that path.
+    @Test func closingGoesBackToAccessoryAfterHiding() {
+        let activation = FakeActivationService()
+        activation.frontmost = nil
+        let (controller, cleanup) = makeController(activation: activation)
+        defer { cleanup() }
+
+        openAndClose(controller)
+
+        #expect(activation.hideCount == 1)
+        #expect(activation.policies == [.regular, .accessory])
+    }
+
+    @Test func reopeningTurnsTheAppRegularAgain() {
+        let activation = FakeActivationService()
+        activation.frontmost = FakeApp()
+        let (controller, cleanup) = makeController(activation: activation)
+        defer { cleanup() }
+
+        let window = controller.prepareWindow()
+        openAndClose(controller)
+        controller.rememberFocusOwner()
+
+        #expect(activation.policies == [.regular, .accessory, .regular])
+        // A window that was never on screen is closed once and stays closed; the delegate method is
+        // called directly so the second cycle ends the way the first one did.
+        controller.windowWillClose(Notification(name: NSWindow.willCloseNotification, object: window))
+        #expect(activation.policies == [.regular, .accessory, .regular, .accessory])
     }
 
     private let track = TrackInfo(

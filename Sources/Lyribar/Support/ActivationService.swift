@@ -8,6 +8,8 @@ protocol ActivationService {
     func frontmostApplication() -> (any ActivatableApp)?
     /// Hides this app, which makes the system bring the app behind it forward.
     func hideSelf()
+    /// Switches this app between the accessory and regular kinds while it runs.
+    func setActivationPolicy(_ policy: NSApplication.ActivationPolicy)
 }
 
 /// An app focus can be handed back to.
@@ -28,6 +30,11 @@ struct SystemActivationService: ActivationService {
 
     func hideSelf() {
         NSApplication.shared.hide(nil)
+    }
+
+    func setActivationPolicy(_ policy: NSApplication.ActivationPolicy) {
+        // The result only says whether the policy changed; a no-op switch is not an error here.
+        _ = NSApplication.shared.setActivationPolicy(policy)
     }
 }
 
