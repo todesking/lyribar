@@ -37,6 +37,8 @@ actor SpotifyTokenProvider {
 
     private var issued: (cookie: String, token: String, expiresAt: Date)?
     private var rejectedCookie: String?
+    private var inFlight: (id: Int, cookie: String, task: Task<String, Error>)?
+    private var lastIssueID = 0
 
     init(
         session: URLSession = .shared,
@@ -59,14 +61,40 @@ actor SpotifyTokenProvider {
         }
         // A cookie Spotify already refused will not start working; a new one deserves a try.
         guard rejectedCookie != cookie else { throw SpotifyAuthError.cookieRejected }
+        // Callers that arrive while a token is being issued share it instead of sending their own
+        // TOTP request. An issuance for another cookie is stale, so it is replaced rather than
+        // joined.
+        if let inFlight, inFlight.cookie == cookie {
+            return try await inFlight.task.value
+        }
+
+        lastIssueID += 1
+        let id = lastIssueID
+        // Unstructured on purpose: one caller giving up must not cancel the others' issuance.
+        let task = Task { try await self.issue(id: id, cookie: cookie) }
+        inFlight = (id, cookie, task)
+        return try await task.value
+    }
+
+    /// Drops the remembered token, but not the memory of a refused cookie. An issuance already
+    /// under way may be joined: its token is newer than the one being dropped.
+    func invalidate() {
+        issued = nil
+    }
+
+    /// The three hops, run once per `inFlight` entry.
+    private func issue(id: Int, cookie: String) async throws -> String {
+        defer { if inFlight?.id == id { inFlight = nil } }
 
         let secret = try await fetchSecret()
+        // Fetched after the secrets, not alongside them, so the TOTP is built on a fresh clock.
         let serverTime = try await fetchServerTime()
         let code = SpotifyTOTP.code(
             key: SpotifyTOTP.key(fromSecret: secret.values), time: serverTime)
         let response = try await fetchToken(cookie: cookie, code: code, version: secret.version)
         guard !response.isAnonymous else {
-            issued = nil
+            // An issuance for another cookie may have landed meanwhile; only drop our own token.
+            if issued?.cookie == cookie { issued = nil }
             rejectedCookie = cookie
             throw SpotifyAuthError.cookieRejected
         }
@@ -75,11 +103,6 @@ actor SpotifyTokenProvider {
             Date(timeIntervalSince1970: response.accessTokenExpirationTimestampMs / 1000)
         )
         return response.accessToken
-    }
-
-    /// Drops the remembered token, but not the memory of a refused cookie.
-    func invalidate() {
-        issued = nil
     }
 
     // JSON objects have no key order, so the newest version is the numerically largest key.
