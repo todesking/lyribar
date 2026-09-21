@@ -82,6 +82,16 @@ struct SettingsWindowControllerTests {
         #expect(window.contentViewController is NSHostingController<SettingsView>)
     }
 
+    /// A reused window stays on the Space it was closed on, so it has to follow the active one.
+    @Test func windowMovesToTheActiveSpace() {
+        let (controller, cleanup) = makeController()
+        defer { cleanup() }
+
+        let window = controller.prepareWindow()
+
+        #expect(window.collectionBehavior.contains(.moveToActiveSpace))
+    }
+
     @Test func theSameWindowIsReused() {
         let (controller, cleanup) = makeController()
         defer { cleanup() }

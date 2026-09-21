@@ -84,6 +84,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         // Titled and closable only: no zoom, no minimize, fixed size.
         window.styleMask = [.titled, .closable]
         window.isReleasedWhenClosed = false
+        // The window is reused, and a closed window stays on the Space it was last shown on:
+        // without this, opening it from another Space switches back to that Space.
+        window.collectionBehavior = [.moveToActiveSpace]
         window.delegate = self
         window.center()
         self.window = window

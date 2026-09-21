@@ -5,6 +5,12 @@ the project uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Fixed
+
+- Opening the settings from another desktop (Space) than the one they were last
+  closed on now shows the window on the current desktop, instead of switching
+  back to the old one.
+
 ## 0.2.0 - 2026-09-21
 
 ### Changed
