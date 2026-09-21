@@ -279,10 +279,11 @@ struct LyricsRibbonViewTests {
         let view = LyricsRibbonView(frame: NSRect(x: 0, y: 0, width: 200, height: 22))
         let now = Date()
         view.lyrics = longLyrics
-        // Short of the limit: the view rests at its own, slightly later, idea of now.
         let ahead = BarTextLayer.maxSettleDistance - 2
         for position in stride(from: TimeInterval(100), to: 104, by: 0.25) {
             view.playback = longState(position: position, at: now)
+            // The view rested at its own, later, idea of now: a drift that could turn the glide into a seek.
+            view.updatePosition(now: now)
             view.updateAttachedLines(now: now, shownX: view.ribbonLayer.position.x - ahead)
             let end = view.offset(at: now.addingTimeInterval(LyricsRibbonView.attachHorizon))
             #expect(try visible(view, offset: end + ahead).isSubset(of: attached(view)), "at \(position) s")
