@@ -7,7 +7,9 @@ enum LRCLibError: Error, Equatable {
 }
 
 /// Fetches synced lyrics from LRCLIB: `/api/get` by artist/title/duration, falling back to
-/// `/api/search` by artist/title when the exact match misses. Plain lyrics are never used.
+/// `/api/search` by artist/title when the exact match misses. Among the search results, only
+/// records whose duration is close to the track's are considered, closest first. Plain lyrics
+/// are never used.
 struct LRCLibProvider: LyricsProvider {
     static let source = "lrclib"
 
@@ -15,6 +17,10 @@ struct LRCLibProvider: LyricsProvider {
 
     private static let scheme = "https"
     private static let host = "lrclib.net"
+    // /api/get already tolerates a couple of seconds; the wider margin here is only meant to
+    // absorb search's fuzzy name matching (feat. credits, "Remastered" suffixes, ...), not to
+    // match a different version of the track.
+    private static let searchDurationTolerance: Double = 3
 
     private let http: RetryingHTTPClient
     private let userAgent: String
@@ -71,13 +77,29 @@ struct LRCLibProvider: LyricsProvider {
         switch status {
         case 200:
             let records = try JSONDecoder().decode([Record].self, from: data)
-            guard let synced = records.lazy.compactMap(\.syncedLyrics).first else { return nil }
-            return LRCParser.parse(synced)
+            return bestMatch(among: records, for: track)
         case 404:
             return nil
         default:
             throw LRCLibError.unexpectedStatus(status)
         }
+    }
+
+    private func bestMatch(among records: [Record], for track: TrackInfo) -> SyncedLyrics? {
+        let candidates = records
+            .compactMap { record -> (synced: String, distance: Double)? in
+                guard let synced = record.syncedLyrics, let duration = record.duration else {
+                    return nil
+                }
+                let distance = abs(duration - track.duration)
+                guard distance <= Self.searchDurationTolerance else { return nil }
+                return (synced, distance)
+            }
+            .sorted { $0.distance < $1.distance }
+        for candidate in candidates {
+            if let parsed = LRCParser.parse(candidate.synced) { return parsed }
+        }
+        return nil
     }
 
     private func send(_ request: URLRequest) async throws -> (Data, Int) {
@@ -112,5 +134,6 @@ struct LRCLibProvider: LyricsProvider {
 
     private struct Record: Decodable {
         let syncedLyrics: String?
+        let duration: Double?
     }
 }
