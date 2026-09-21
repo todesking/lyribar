@@ -20,7 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var settingsWindow = SettingsWindowController(
         settings: settings, launchAtLogin: launchAtLogin, spotify: spotifyAccount, cache: lyricsCache)
     private var statusItemController: StatusItemController?
-    private var resolvedTrack: TrackInfo?
+    private var playbackObservation: ObservationLoop?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Makes Cmd+W close the settings window; see makeMainMenu().
@@ -47,19 +47,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         playbackMonitor.start()
     }
 
+    // Subscribed before playbackMonitor.start(), so the empty initial state needs no first call.
     private func observePlayback() {
-        let state = withObservationTracking {
-            playbackMonitor.state
-        } onChange: { [weak self] in
-            Task { @MainActor in
-                self?.observePlayback()
-            }
-        }
-
-        // Compared by id: the duration Spotify reports for the track being played can be revised.
-        if state.track?.id != resolvedTrack?.id {
-            resolvedTrack = state.track
-            lyricsResolver.resolve(track: state.track)
-        }
+        playbackObservation = ObservationLoop(
+            read: { [playbackMonitor] in _ = playbackMonitor.state },
+            onChange: { [weak self] in
+                guard let self else { return }
+                lyricsResolver.resolve(track: playbackMonitor.state.track)
+            })
     }
 }

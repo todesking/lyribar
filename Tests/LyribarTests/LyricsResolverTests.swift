@@ -1,9 +1,15 @@
 import Foundation
+import Observation
 import Testing
 
 @testable import Lyribar
 
 private enum FakeError: Error { case boom }
+
+@MainActor
+private final class ChangeCounter {
+    var count = 0
+}
 
 /// The automatic retry fires at once; the wait itself is covered with a `SleepGate`.
 private let instantSleep: @Sendable (Duration) async throws -> Void = { _ in }
@@ -160,6 +166,26 @@ struct LyricsResolverTests {
 
         #expect(resolver.status.isIdle)
         #expect(resolver.fetchTask == nil)
+    }
+
+    // Every playback state change resolves the track, and with nothing playing that is nil each
+    // time. Status is not Equatable, so re-assigning .idle would redraw the bar on every tick.
+    @Test func resolvingNilWhileIdleDoesNotNotify() async {
+        let cache = makeCache()
+        defer { remove(cache) }
+        let resolver = LyricsResolver(provider: RecordingProvider(.missing), cache: cache)
+        resolver.resolve(track: nil)
+
+        let counter = ChangeCounter()
+        withObservationTracking {
+            _ = resolver.status
+        } onChange: {
+            MainActor.assumeIsolated { counter.count += 1 }
+        }
+        resolver.resolve(track: nil)
+
+        #expect(counter.count == 0)
+        #expect(resolver.status.isIdle)
     }
 
     @Test func cacheHitSkipsProvider() async {
@@ -489,6 +515,51 @@ struct LyricsResolverTests {
         #expect(resolver.retryTask == nil)
         for _ in 0..<50 { await Task.yield() }
         #expect(await provider.requested == ["a"])
+    }
+
+    // A retry scheduled before the conditions changed must not fire after the refetch.
+    @Test func refetchDropsThePendingRetry() async {
+        let cache = makeCache()
+        defer { remove(cache) }
+        let gate = SleepGate()  // the automatic retry stays parked until the test releases it
+        let provider = RecordingProvider([.failing, .missing])
+        let resolver = LyricsResolver(provider: provider, cache: cache, sleep: gate.sleep)
+
+        resolver.resolve(track: trackA)
+        await resolver.fetchTask?.value
+        #expect(await gate.waitForSleep())
+
+        resolver.refetch()
+        #expect(resolver.retryTask == nil)
+        await resolver.fetchTask?.value
+        #expect(resolver.status.isNotFound)
+
+        await gate.release()  // the cancelled retry gives up instead of fetching "a" again
+        for _ in 0..<50 { await Task.yield() }
+        #expect(await provider.requested == ["a", "a"])
+    }
+
+    // The conditions changed, so a failure after the refetch earns an automatic retry of its own.
+    @Test func refetchFailureSchedulesAnotherRetry() async {
+        let cache = makeCache()
+        defer { remove(cache) }
+        let provider = RecordingProvider(.failing)
+        let resolver = LyricsResolver(provider: provider, cache: cache, sleep: instantSleep)
+
+        resolver.resolve(track: trackA)
+        await resolver.fetchTask?.value
+        await resolver.retryTask?.value
+        await resolver.fetchTask?.value
+        #expect(await provider.requested == ["a", "a"])  // the one automatic retry is used up
+
+        resolver.refetch()
+        await resolver.fetchTask?.value
+        await resolver.retryTask?.value
+        await resolver.fetchTask?.value
+
+        #expect(resolver.status.failure is FakeError)
+        #expect(await provider.requested == ["a", "a", "a", "a"])
+        resolver.resolve(track: nil)  // drops anything still scheduled
     }
 
     // Without a cached entry there is nothing to bypass, so this is the plain retry path.

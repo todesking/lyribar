@@ -13,7 +13,7 @@ enum LRCParser {
         return SyncedLyrics(lines: lines)
     }
 
-    /// Consumes leading `[mm:ss.xx]` tags and pairs each with the remaining text.
+    /// Consumes leading `[mm:ss]` / `[mm:ss.xx]` tags and pairs each with the remaining text.
     /// A line whose leading bracket is not a timestamp (e.g. `[ar:Artist]`) is ignored.
     private static func parseLine(_ line: Substring) -> [LyricLine] {
         var remainder = line
@@ -33,28 +33,31 @@ enum LRCParser {
         return times.map { LyricLine(time: $0, text: text) }
     }
 
-    /// Parses `mm:ss.xx` where `mm` is 1+ digits, `ss` is exactly 2 digits,
-    /// and `xx` is 2 or 3 digits.
+    /// Parses `mm:ss` or `mm:ss.xx` where `mm` is 1+ digits, `ss` is exactly 2 digits,
+    /// and the optional fraction is 1 to 3 digits. `[offset:…]` is not applied.
     private static func parseTimestamp(_ content: Substring) -> TimeInterval? {
         let parts = content.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
         guard parts.count == 2 else { return nil }
         let secondsParts = parts[1].split(separator: ".", maxSplits: 1, omittingEmptySubsequences: false)
-        guard secondsParts.count == 2 else { return nil }
 
         let minutesPart = parts[0]
         let secondsPart = secondsParts[0]
-        let fractionPart = secondsParts[1]
 
         guard isAllDigits(minutesPart),
             secondsPart.count == 2, isAllDigits(secondsPart),
-            (2...3).contains(fractionPart.count), isAllDigits(fractionPart),
             let minutes = Double(minutesPart),
-            let seconds = Double(secondsPart),
-            let fraction = Double(fractionPart)
+            let seconds = Double(secondsPart)
         else { return nil }
 
-        let fractionScale = fractionPart.count == 2 ? 100.0 : 1000.0
-        return minutes * 60 + seconds + fraction / fractionScale
+        var fractionSeconds = 0.0
+        if secondsParts.count == 2 {
+            let fractionPart = secondsParts[1]
+            guard (1...3).contains(fractionPart.count), isAllDigits(fractionPart),
+                let fraction = Double(fractionPart)
+            else { return nil }
+            fractionSeconds = fraction / pow(10, Double(fractionPart.count))
+        }
+        return minutes * 60 + seconds + fractionSeconds
     }
 
     private static func isAllDigits(_ s: Substring) -> Bool {

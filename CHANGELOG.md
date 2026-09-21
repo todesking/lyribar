@@ -21,6 +21,14 @@ the project uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
   splits one track's lyrics across two cache entries. The cache is rebuilt as
   tracks are looked up again; existing cache files are unused going forward but
   are still cleaned up by "Clear lyrics cache".
+- Lyrics whose timestamps carry no fraction (`[01:23]`) or a single decimal
+  (`[01:23.4]`) are shown instead of being dropped line by line. A track whose
+  lyrics were written that way throughout used to report "No lyrics found".
+- Saving or removing the Spotify cookie while a lyrics fetch had failed no
+  longer lets the retry that was waiting for the old conditions fire afterwards,
+  which made the bar flicker back to "Loading lyrics…" and sent a needless
+  request. A fetch that fails right after the cookie changed now gets an
+  automatic retry of its own, even if the previous conditions had used theirs up.
 - LRCLIB's search fallback now only considers results whose duration is close
   to the playing track's, picking the closest match. It used to take the first
   result with synced lyrics regardless of duration, so a Live, Remix, or

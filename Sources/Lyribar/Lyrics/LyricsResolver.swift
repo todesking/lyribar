@@ -42,6 +42,9 @@ final class LyricsResolver {
     /// and that must not cancel an in-flight fetch or trigger a refetch.
     func resolve(track: TrackInfo?) {
         guard let track else {
+            // Status is not Equatable, so re-assigning .idle would notify observers on every
+            // playback state change while nothing is playing.
+            if self.track == nil, case .idle = status { return }
             cancelAll()
             self.track = nil
             status = .idle
@@ -55,7 +58,7 @@ final class LyricsResolver {
     }
 
     /// Resolves the current track again. Used by the automatic retry after a failure, and the hook
-    /// for retrying by hand.
+    /// for retrying by hand. Only the fetch is cancelled: the scheduled retry is the caller.
     func retry() {
         guard let track else { return }
         cancelFetch()
@@ -65,9 +68,13 @@ final class LyricsResolver {
     /// Fetches the current track again without reading the cache, and keeps the cached lyrics
     /// showing until a new result arrives. Used when the conditions of a fetch change, such as a
     /// Spotify cookie being saved or removed.
+    ///
+    /// A retry scheduled under the old conditions is dropped, and the one automatic retry becomes
+    /// available again: the conditions changed, so a failure now is a new one.
     func refetch() {
         guard let track else { return }
-        cancelFetch()
+        cancelAll()
+        didRetryCurrentTrack = false
         start(track, bypassCache: true)
     }
 
