@@ -42,6 +42,9 @@ final class LyricsResolver {
     /// and that must not cancel an in-flight fetch or trigger a refetch.
     func resolve(track: TrackInfo?) {
         guard let track else {
+            // Status is not Equatable, so re-assigning .idle would notify observers on every
+            // playback state change while nothing is playing.
+            if self.track == nil, case .idle = status { return }
             cancelAll()
             self.track = nil
             status = .idle

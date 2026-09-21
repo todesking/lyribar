@@ -1,9 +1,15 @@
 import Foundation
+import Observation
 import Testing
 
 @testable import Lyribar
 
 private enum FakeError: Error { case boom }
+
+@MainActor
+private final class ChangeCounter {
+    var count = 0
+}
 
 /// The automatic retry fires at once; the wait itself is covered with a `SleepGate`.
 private let instantSleep: @Sendable (Duration) async throws -> Void = { _ in }
@@ -160,6 +166,26 @@ struct LyricsResolverTests {
 
         #expect(resolver.status.isIdle)
         #expect(resolver.fetchTask == nil)
+    }
+
+    // Every playback state change resolves the track, and with nothing playing that is nil each
+    // time. Status is not Equatable, so re-assigning .idle would redraw the bar on every tick.
+    @Test func resolvingNilWhileIdleDoesNotNotify() async {
+        let cache = makeCache()
+        defer { remove(cache) }
+        let resolver = LyricsResolver(provider: RecordingProvider(.missing), cache: cache)
+        resolver.resolve(track: nil)
+
+        let counter = ChangeCounter()
+        withObservationTracking {
+            _ = resolver.status
+        } onChange: {
+            MainActor.assumeIsolated { counter.count += 1 }
+        }
+        resolver.resolve(track: nil)
+
+        #expect(counter.count == 0)
+        #expect(resolver.status.isIdle)
     }
 
     @Test func cacheHitSkipsProvider() async {
