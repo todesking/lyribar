@@ -1,7 +1,37 @@
 import Foundation
+import Synchronization
 import Testing
 
 @testable import Lyribar
+
+/// Counts cookie reads. `token()` reads the cookie and then decides whether to join a running
+/// issuance without suspending in between, so the count tells how many callers have decided.
+private final class CountingCredentialStore: SpotifyCredentialStore {
+    private let state = Mutex<(cookie: String?, reads: Int)>((nil, 0))
+
+    init(cookie: String?) { state.withLock { $0.cookie = cookie } }
+
+    var reads: Int { state.withLock { $0.reads } }
+
+    func cookie() -> String? {
+        state.withLock {
+            $0.reads += 1
+            return $0.cookie
+        }
+    }
+
+    func setCookie(_ value: String?) { state.withLock { $0.cookie = value } }
+}
+
+/// Polls rather than counting yields: a busy machine only makes the wait longer.
+private func waitUntil(_ condition: @Sendable () -> Bool) async -> Bool {
+    let deadline = ContinuousClock.now + .seconds(5)
+    while ContinuousClock.now < deadline {
+        if condition() { return true }
+        try? await Task.sleep(for: .milliseconds(1))
+    }
+    return false
+}
 
 /// A clock the test moves by hand, so token expiry needs no real waiting.
 private final class TestClock: @unchecked Sendable {
@@ -221,6 +251,67 @@ struct SpotifyTokenProviderTests {
         await #expect(throws: SpotifyAuthError.unexpectedResponse(step: .serverTime, status: nil)) {
             _ = try await broken.token()
         }
+    }
+
+    @Test func callersThatArriveDuringAnIssuanceShareIt() async throws {
+        let credentials = CountingCredentialStore(cookie: Self.cookie)
+        let gate = DispatchSemaphore(value: 0)
+        let handler = Self.handler()
+        let stub = StubURLProtocol.stub { request in
+            // Hold the first hop so all three callers are inside token() at the same time.
+            // Blocking is safe here: the stub loads on the session's thread, not the test's.
+            if request.url?.path == "/secretDict.json" { _ = gate.wait(timeout: .now() + 5) }
+            return handler(request)
+        }
+        let provider = SpotifyTokenProvider(
+            session: stub.session, credentials: credentials, secretsURL: Self.secretsURL,
+            now: clock.now)
+
+        let callers = (0..<3).map { _ in Task { try await provider.token() } }
+        let allArrived = await waitUntil { credentials.reads == 3 }
+        gate.signal()
+
+        #expect(allArrived)
+        for caller in callers {
+            #expect(try await caller.value == "token-1")
+        }
+        // One issuance, not three: the two that arrived late sent nothing of their own.
+        #expect(
+            stub.requests.map { $0.url?.path } == [
+                "/secretDict.json", "/api/server-time", "/api/token",
+            ])
+    }
+
+    @Test func aFailedIssuanceIsSharedAndThenForgotten() async throws {
+        let credentials = CountingCredentialStore(cookie: Self.cookie)
+        let gate = DispatchSemaphore(value: 0)
+        let attempts = Mutex(0)
+        let handler = Self.handler()
+        let stub = StubURLProtocol.stub { request in
+            guard request.url?.path == "/secretDict.json",
+                attempts.withLock({ $0 += 1; return $0 }) == 1
+            else { return handler(request) }
+            _ = gate.wait(timeout: .now() + 5)
+            return (500, Data("nope".utf8))
+        }
+        let provider = SpotifyTokenProvider(
+            session: stub.session, credentials: credentials, secretsURL: Self.secretsURL,
+            now: clock.now)
+
+        let callers = (0..<3).map { _ in Task { try await provider.token() } }
+        let allArrived = await waitUntil { credentials.reads == 3 }
+        gate.signal()
+
+        #expect(allArrived)
+        let failure = SpotifyAuthError.unexpectedResponse(step: .secrets, status: 500)
+        for caller in callers {
+            await #expect(throws: failure) { _ = try await caller.value }
+        }
+        #expect(stub.requests.count == 1)
+
+        // The failure leaves nothing behind: the next caller starts an issuance of its own.
+        #expect(try await provider.token() == "token-1")
+        #expect(stub.requests.count == 4)
     }
 
     @Test func tokenFailureIsReportedAsSuch() async throws {
