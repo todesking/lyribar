@@ -32,6 +32,8 @@ struct LyricsRibbon: Equatable {
     /// The curve the scrolling follows, in time order: the lead-in from one gap before the first line
     /// (only when it does not start the track), one node per line, and the run-out to the end of the
     /// ribbon at the track duration (only when it is after the last line). Empty without lines.
+    /// Of lines sharing a time only the last one has a node, so the segment before it scrolls past the
+    /// others instead of the ribbon jumping over them.
     func curve(duration: TimeInterval) -> Curve {
         guard let first = lines.first, let last = lines.last else { return Curve(nodes: []) }
         var nodes: [Curve.Node] = []
@@ -40,7 +42,12 @@ struct LyricsRibbon: Equatable {
             nodes.append(Curve.Node(time: 0, x: origins[0] - Self.gap))
         }
         for index in lines.indices {
-            nodes.append(Curve.Node(time: lines[index].time, x: origins[index]))
+            let node = Curve.Node(time: lines[index].time, x: origins[index])
+            if nodes.last?.time == node.time {
+                nodes[nodes.count - 1] = node
+            } else {
+                nodes.append(node)
+            }
         }
         if duration > last.time {
             nodes.append(Curve.Node(time: duration, x: origins[lines.count]))
@@ -98,6 +105,7 @@ extension LyricsRibbon {
             var end: CGFloat
         }
 
+        /// In strictly ascending time.
         let nodes: [Node]
         /// One per segment between two nodes, so one less than `nodes`.
         let slopes: [Slopes]
@@ -108,39 +116,23 @@ extension LyricsRibbon {
                 slopes = []
                 return
             }
-            // Segments of no length (lines sharing a time) are jumped over, so they have no speed and
-            // the nodes around them look past them for a neighbour.
-            let speeds: [CGFloat?] = (0..<nodes.count - 1).map { index in
-                let span = nodes[index + 1].time - nodes[index].time
-                guard span > 0 else { return nil }
-                return (nodes[index + 1].x - nodes[index].x) / CGFloat(span)
-            }
-            var before = [CGFloat?](repeating: nil, count: nodes.count)
-            var carried: CGFloat?
-            for index in 1..<nodes.count {
-                carried = speeds[index - 1] ?? carried
-                before[index] = carried
-            }
-            var after = [CGFloat?](repeating: nil, count: nodes.count)
-            carried = nil
-            for index in (0..<nodes.count - 1).reversed() {
-                carried = speeds[index] ?? carried
-                after[index] = carried
+            let speeds = (0..<nodes.count - 1).map { index in
+                (nodes[index + 1].x - nodes[index].x) / CGFloat(nodes[index + 1].time - nodes[index].time)
             }
             let nodeSpeeds = nodes.indices.map { index -> CGFloat in
                 guard index > 0, index < nodes.count - 1 else { return 0 }
-                return Self.boundarySpeed(before: before[index], after: after[index])
+                return Self.boundarySpeed(before: speeds[index - 1], after: speeds[index])
             }
             slopes = speeds.enumerated().map { index, speed in
-                guard let speed, speed > 0 else { return Slopes(start: 1, end: 1) }
+                guard speed > 0 else { return Slopes(start: 1, end: 1) }
                 return Slopes(start: nodeSpeeds[index] / speed, end: nodeSpeeds[index + 1] / speed)
             }
         }
 
         /// The speed the ribbon passes a node with, from the average speeds of the segments before and
-        /// after it. Nil stands for no segment to take a speed from.
-        static func boundarySpeed(before: CGFloat?, after: CGFloat?) -> CGFloat {
-            guard let before, let after, before > 0, after > 0 else { return 0 }
+        /// after it.
+        static func boundarySpeed(before: CGFloat, after: CGFloat) -> CGFloat {
+            guard before > 0, after > 0 else { return 0 }
             // The harmonic mean is at most twice the slower side, which keeps every segment monotone.
             return 2 * before * after / (before + after)
         }
@@ -156,7 +148,6 @@ extension LyricsRibbon {
 
         func x(at position: TimeInterval) -> CGFloat {
             guard let first = nodes.first, let last = nodes.last else { return 0 }
-            // Of nodes sharing a time the later one wins, so shared times jump to the later line.
             if position >= last.time { return last.x }
             if position < first.time { return first.x }
 
@@ -173,9 +164,8 @@ extension LyricsRibbon {
             guard low + 1 < nodes.count else { return last.x }
             let from = nodes[low]
             let to = nodes[low + 1]
-            let span = to.time - from.time
-            guard span > 0 else { return to.x }
-            let progress = Self.progress(at: CGFloat((position - from.time) / span), slopes: slopes[low])
+            let progress = Self.progress(
+                at: CGFloat((position - from.time) / (to.time - from.time)), slopes: slopes[low])
             return from.x + (to.x - from.x) * progress
         }
     }
